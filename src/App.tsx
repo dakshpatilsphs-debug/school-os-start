@@ -86,6 +86,7 @@ const App: React.FC = () => {
       pdfBodySize: 10,
       // Offer Letter defaults (global — same for all employees)
       offerTitle: 'Offer Letter',
+      offerPointsHeading: 'Terms & Conditions',
       offerIntro: 'Subject: Appointment for the position of',
       offerPoints: 'Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies and code of conduct.\nSalary & Duties | Salary and duties will be as discussed and recorded by the administration.',
       offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.',
@@ -915,6 +916,7 @@ const App: React.FC = () => {
 
     // ── Data ──
     const subject = schoolSettings.offerIntro || '';
+    const pointsHeading = schoolSettings.offerPointsHeading || 'Terms & Conditions';
     const pointsRaw = String(schoolSettings.offerPoints || '').split('\n').map((p: string) => p.trim()).filter(Boolean);
     const terms = schoolSettings.offerTerms || 'This offer is valid subject to acceptance and completion of joining formalities.';
     const ack = schoolSettings.offerAck || '';
@@ -1000,28 +1002,57 @@ const App: React.FC = () => {
       y += subLines.length * 5 + 10;
     }
 
-    // ═══ 5. OFFER POINTS (Terms & Conditions) ═══
+    // ═══ 5. OFFER POINTS ═══
     if (points.length) {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...sPrimaryDark);
-      doc.text('Terms & Conditions', ml, y);
+      doc.text(pointsHeading, ml, y);
       y += 10;
+      const indent = 6;
+      const descIndent = indent + 4;
+      const titleW = cw - indent - 4;
+      const descW = cw - descIndent - 4;
       for (let i = 0; i < points.length; i++) {
         const pt = points[i];
-        const tl = doc.splitTextToSize(pt.t, cw - 8);
-        if (y + (pt.d ? tl.length * 5 + 4 : tl.length * 5) + 4 > ph - 35) { doc.addPage(); y = 28; }
+        const number = `${i + 1}.`;
+        const numW = doc.getTextWidth(number + ' ');
+        const titleLines = doc.splitTextToSize(pt.t, titleW - numW);
+        const linesCount = 1 + (titleLines.length > 1 ? titleLines.length - 1 : 0) + (pt.d ? pt.d.length : 0);
+        const estH = linesCount * 6 + 4;
+        if (y + estH > ph - 35) { doc.addPage(); y = 28; }
+
+        // Number + title on first line
         doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...sPrimaryDark);
-        doc.text(`${i + 1}. ${pt.t}`, ml + 4, y);
-        y += tl.length * 5 + 3;
+        doc.text(number, ml + indent, y);
+        doc.text(pt.t, ml + indent + numW, y);
+        y += 6;
+
+        // Multi-line title remainder
+        if (titleLines.length > 1) {
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...sPrimaryDark);
+          for (let ti = 1; ti < titleLines.length; ti++) {
+            doc.text(titleLines[ti], ml + indent + numW, y);
+            y += 6;
+          }
+        }
+
+        // Description items
         if (pt.d && pt.d.length > 0) {
           for (const desc of pt.d) {
-            const dl = doc.splitTextToSize('• ' + desc, cw - 12);
-            if (y + dl.length * 5 > ph - 35) { doc.addPage(); y = 28; }
+            const dl = doc.splitTextToSize(desc, descW);
+            if (y + dl.length * 5 + 2 > ph - 35) { doc.addPage(); y = 28; }
             doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...sTextSec);
-            doc.text(dl, ml + 10, y);
-            y += dl.length * 5 + 3;
+            // bullet + first line
+            doc.text('•', ml + descIndent, y);
+            doc.text(dl[0], ml + descIndent + 4, y);
+            y += 5;
+            for (let di = 1; di < dl.length; di++) {
+              if (y + 5 > ph - 35) { doc.addPage(); y = 28; }
+              doc.text(dl[di], ml + descIndent + 4, y);
+              y += 5;
+            }
           }
-          y += 2;
         }
+        y += 3;
       }
       y += 4;
     }
@@ -1052,7 +1083,7 @@ const App: React.FC = () => {
       y += ackH + 12;
     }
 
-    // ═══ 8. SIGNATURE ── salary slip style ── ═══
+    // ═══ 8. SIGNATURE ═══
     const SIG_LINE_WIDTH = 55;
     const SIG_GAP_ABOVE = 55;
     const SIG_LABEL_OFFSET = 6;

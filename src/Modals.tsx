@@ -219,7 +219,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         </div>
 
         {/* Reset Button */}
-        <button onClick={() => p.setSchoolSettings({ ...p.schoolSettings, pdfHeading: 'School Management Report', pdfSubtitle: 'Comprehensive data overview', pdfFooterText: 'Confidential - For internal use only', pdfStudentSubtitle: 'All registered students with details', pdfFeesSubtitle: 'Complete fee records and collection status', pdfEmployeeSubtitle: 'All staff members with salary details', pdfExpenseSubtitle: 'All recorded expenses with payment status', pdfEquipmentSubtitle: 'All equipment records and assignment details', pdfClassSummarySubtitle: 'Overview of all classes', pdfFinancialSubtitle: 'Complete financial overview', pdfLogoWidth: 40, pdfLogoHeight: 40, pdfHeaderColor: '#0ea5e9', pdfBodyColor: '#1e293b', pdfTableHeaderColor: '#0ea5e9', pdfAccentColor: '#4361ee', pdfTitleSize: 22, pdfBodySize: 10, offerTitle: 'Offer Letter', offerIntro: 'Subject: Appointment for the position of', offerPoints: 'Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies and code of conduct.\nSalary & Duties | Salary and duties will be as discussed and recorded by the administration.', offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.', offerSignatory: 'Principal / Administrator', offerAck: 'I acknowledge and accept the terms and conditions mentioned above.' })} className="text-xs text-gray-400 hover:text-cyan-400 underline">Reset all PDF settings to default</button>
+        <button onClick={() => p.setSchoolSettings({ ...p.schoolSettings, pdfHeading: 'School Management Report', pdfSubtitle: 'Comprehensive data overview', pdfFooterText: 'Confidential - For internal use only', pdfStudentSubtitle: 'All registered students with details', pdfFeesSubtitle: 'Complete fee records and collection status', pdfEmployeeSubtitle: 'All staff members with salary details', pdfExpenseSubtitle: 'All recorded expenses with payment status', pdfEquipmentSubtitle: 'All equipment records and assignment details', pdfClassSummarySubtitle: 'Overview of all classes', pdfFinancialSubtitle: 'Complete financial overview', pdfLogoWidth: 40, pdfLogoHeight: 40, pdfHeaderColor: '#0ea5e9', pdfBodyColor: '#1e293b', pdfTableHeaderColor: '#0ea5e9', pdfAccentColor: '#4361ee', pdfTitleSize: 22, pdfBodySize: 10, offerTitle: 'Offer Letter', offerPointsHeading: 'Terms & Conditions', offerIntro: 'Subject: Appointment for the position of', offerPoints: 'Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies and code of conduct.\nSalary & Duties | Salary and duties will be as discussed and recorded by the administration.', offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.', offerSignatory: 'Principal / Administrator', offerAck: 'I acknowledge and accept the terms and conditions mentioned above.' })} className="text-xs text-gray-400 hover:text-cyan-400 underline">Reset all PDF settings to default</button>
       </div>
 
       <button onClick={() => p.setShowModal(false)} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white p-3 rounded-lg font-bold">Save Settings</button>
@@ -544,6 +544,8 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(cur.filter((_, idx) => idx !== i)) });
     };
 
+    const heading = p.schoolSettings.offerPointsHeading || 'Terms & Conditions';
+
     return (
       <div className="space-y-5">
         <div className="flex items-center justify-between">
@@ -553,6 +555,8 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-4">
           <div className="space-y-1"><label className="text-xs text-cyan-400">Offer Title</label><input value={p.schoolSettings.offerTitle || 'Offer Letter'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerTitle: e.target.value })} className={inputCls} /></div>
           <div className="space-y-1"><label className="text-xs text-cyan-400">Subject</label><textarea value={p.schoolSettings.offerIntro || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerIntro: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm h-20" placeholder="Subject: Appointment for the position of..." /></div>
+
+          <div className="space-y-1"><label className="text-xs text-cyan-400">Points Heading</label><input value={p.schoolSettings.offerPointsHeading || 'Terms & Conditions'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerPointsHeading: e.target.value })} className={inputCls} placeholder="Terms & Conditions" /></div>
 
           {/* Dynamic Points Builder */}
           <div className="space-y-3">
@@ -583,7 +587,9 @@ export const AppModals: React.FC<ModalProps> = (p) => {
           <div className="space-y-1"><label className="text-xs text-cyan-400">Acknowledgement <span className="text-gray-500">(shown before signature)</span></label><textarea value={p.schoolSettings.offerAck || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerAck: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-16" placeholder="I acknowledge and accept the terms..." /></div>
           <div className="space-y-1"><label className="text-xs text-cyan-400">Signatory</label><input value={p.schoolSettings.offerSignatory || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerSignatory: e.target.value })} className={inputCls} placeholder="Principal / Administrator" /></div>
         </div>
-        <button onClick={() => p.setShowOfferLetterSettings(false)} className="w-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-3 rounded-lg font-bold">Done</button>
+        <div className="flex gap-3">
+          <button onClick={() => p.setShowOfferLetterSettings(false)} className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-3 rounded-lg font-bold">Done</button>
+        </div>
       </div>
     );
   };
