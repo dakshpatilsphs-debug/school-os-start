@@ -966,7 +966,12 @@ const App: React.FC = () => {
 
     // ═══ 3. EMPLOYEE DETAILS CARD ═══
     y = 64;
-    const cardH = 55;
+    const rowX = ml + padLg;
+    const rowW = cw - padLg * 2;
+    const halfW = rowW / 2;
+    const addrLines = employee.address ? doc.splitTextToSize(employee.address, halfW) : [''];
+    const addrExtra = Math.max(0, (addrLines.length - 1) * 4);
+    const cardH = 55 + addrExtra;
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
     doc.roundedRect(ml, y, cw, cardH, 3, 3, 'S');
     doc.setFillColor(...sBgAlt);
@@ -976,21 +981,29 @@ const App: React.FC = () => {
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
     doc.text('EMPLOYEE DETAILS', ml + padLg, y + 7.5);
 
-    const rowX = ml + padLg;
-    const rowW = cw - padLg * 2;
-    const halfW = rowW / 2;
     const drawRow = (label: string, val: string, cx: number, cy: number) => {
       doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
       doc.text(label, cx, cy);
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
-      doc.text(trunc(val, 22), cx + halfW - padLg * 2, cy, { align: 'right' });
+      doc.text(trunc(val || '-', 22), cx + halfW - padLg * 2, cy, { align: 'right' });
     };
     drawRow('Employee ID', employee.autoId || '-', rowX, y + 22);
     drawRow('Designation', employee.role || '-', rowX + halfW, y + 22);
     drawRow('Department', employee.department || '-', rowX, y + 31);
     drawRow('Joining Date', employee.joinDate || '-', rowX + halfW, y + 31);
     drawRow('Salary', money(employee.salary || 0), rowX, y + 40);
-    drawRow('Address', employee.address || '-', rowX + halfW, y + 40);
+    // Address row (full width, wrap long address)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+    doc.text('Address', rowX, y + 49);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...sText);
+    if (employee.address) {
+      doc.text(addrLines[0], rowX + 30, y + 49);
+      for (let ai = 1; ai < addrLines.length; ai++) {
+        doc.text(addrLines[ai], rowX + 30, y + 49 + ai * 4);
+      }
+    } else {
+      doc.text('-', rowX + 30, y + 49);
+    }
     y += cardH + 10;
 
     // ═══ 4. SUBJECT ═══
@@ -1101,6 +1114,10 @@ const App: React.FC = () => {
     doc.text('Employee Signature', leftColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...sPrimary);
     doc.text(employee.name, leftColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET + 10);
+    if (employee.address) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...sTextSec);
+      doc.text(doc.splitTextToSize(employee.address, SIG_LINE_WIDTH), leftColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET + 17);
+    }
 
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
     doc.line(rightColX, y + SIG_GAP_ABOVE, rightColX + SIG_LINE_WIDTH, y + SIG_GAP_ABOVE);
