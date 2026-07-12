@@ -964,9 +964,9 @@ const App: React.FC = () => {
     doc.roundedRect(pillX, 44, pillW, 10, 6, 6, 'FD');
     doc.setTextColor(...sPrimary); doc.text(pillTxt, pillX + pillW / 2, 51.5, { align: 'center' });
 
-    // ═══ 3. EMPLOYEE DETAILS CARD (like salary slip info cards) ═══
+    // ═══ 3. EMPLOYEE DETAILS CARD ═══
     y = 64;
-    const cardH = 48;
+    const cardH = 55;
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
     doc.roundedRect(ml, y, cw, cardH, 3, 3, 'S');
     doc.setFillColor(...sBgAlt);
@@ -987,10 +987,10 @@ const App: React.FC = () => {
     };
     drawRow('Employee ID', employee.autoId || '-', rowX, y + 22);
     drawRow('Designation', employee.role || '-', rowX + halfW, y + 22);
-    drawRow('Department', employee.department || '-', rowX, y + 31.5);
-    drawRow('Joining Date', employee.joinDate || '-', rowX + halfW, y + 31.5);
-    drawRow('Salary', money(employee.salary || 0), rowX, y + 41);
-    drawRow('Status', employee.status || '-', rowX + halfW, y + 41);
+    drawRow('Department', employee.department || '-', rowX, y + 31);
+    drawRow('Joining Date', employee.joinDate || '-', rowX + halfW, y + 31);
+    drawRow('Salary', money(employee.salary || 0), rowX, y + 40);
+    drawRow('Address', employee.address || '-', rowX + halfW, y + 40);
     y += cardH + 10;
 
     // ═══ 4. SUBJECT ═══
@@ -1091,12 +1091,6 @@ const App: React.FC = () => {
     const totalSigH = SIG_BLOCK_HEIGHT + 12;
 
     if (y + totalSigH > ph - 35) { doc.addPage(); y = 28; }
-
-    const forSchool = 'For ' + (schoolSettings.schoolName || 'School OS');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...sText);
-    const forSchoolLines = doc.splitTextToSize(forSchool, cw);
-    doc.text(forSchoolLines, pw / 2, y + 4, { align: 'center' });
-    y += 8;
 
     const leftColX = ml;
     const rightColX = mr - SIG_LINE_WIDTH;
