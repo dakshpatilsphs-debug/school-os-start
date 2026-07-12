@@ -9,6 +9,7 @@ export interface Student {
   discountType?: 'amount' | 'percent';
   discountValue?: number;
   discountAmount?: number;
+  sortOrder?: number;
 }
 export interface Fee {
   id?: string; autoId: string; studentId: string; studentName: string; amount: number;
@@ -38,11 +39,6 @@ export interface Employee {
   salaryRefreshDay?: number;
   inactiveDate?: string;
 
-  offerTitle?: string;
-  offerIntro?: string;
-  offerPoints?: string;
-  offerTerms?: string;
-  offerSignatory?: string;
 }
 export interface CausalLeave { id?: string; employeeId: string; date: string; reason: string; }
 

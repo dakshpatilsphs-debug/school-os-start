@@ -7,7 +7,7 @@ import jsPDF from 'jspdf';
 interface ScheduleSectionProps {
   employees: Employee[];
   students: Student[];
-  showNotification: (msg: string, type?: string) => void;
+  showNotification: (msg: string, type: 'success' | 'error') => void;
   addSubject: (s: any) => Promise<any>;
   getSubjects: () => Promise<any[]>;
   updateSubject: (id: string, d: any) => Promise<void>;

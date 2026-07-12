@@ -9,10 +9,12 @@ interface ModalProps {
   showPackageMgmt: boolean;
   showDocumentMgmt: boolean;
   showSettings: boolean;
+  showOfferLetterSettings: boolean;
   setShowClassMgmt: (v: boolean) => void;
   setShowPackageMgmt: (v: boolean) => void;
   setShowDocumentMgmt: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
+  setShowOfferLetterSettings: (v: boolean) => void;
   setShowModal: (v: boolean) => void;
   activeTab: string;
   modalType: 'add' | 'edit';
@@ -217,7 +219,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         </div>
 
         {/* Reset Button */}
-        <button onClick={() => p.setSchoolSettings({ ...p.schoolSettings, pdfHeading: 'School Management Report', pdfSubtitle: 'Comprehensive data overview', pdfFooterText: 'Confidential - For internal use only', pdfStudentSubtitle: 'All registered students with details', pdfFeesSubtitle: 'Complete fee records and collection status', pdfEmployeeSubtitle: 'All staff members with salary details', pdfExpenseSubtitle: 'All recorded expenses with payment status', pdfEquipmentSubtitle: 'All equipment records and assignment details', pdfClassSummarySubtitle: 'Overview of all classes', pdfFinancialSubtitle: 'Complete financial overview', pdfLogoWidth: 40, pdfLogoHeight: 40, pdfHeaderColor: '#0ea5e9', pdfBodyColor: '#1e293b', pdfTableHeaderColor: '#0ea5e9', pdfAccentColor: '#4361ee', pdfTitleSize: 22, pdfBodySize: 10 })} className="text-xs text-gray-400 hover:text-cyan-400 underline">Reset all PDF settings to default</button>
+        <button onClick={() => p.setSchoolSettings({ ...p.schoolSettings, pdfHeading: 'School Management Report', pdfSubtitle: 'Comprehensive data overview', pdfFooterText: 'Confidential - For internal use only', pdfStudentSubtitle: 'All registered students with details', pdfFeesSubtitle: 'Complete fee records and collection status', pdfEmployeeSubtitle: 'All staff members with salary details', pdfExpenseSubtitle: 'All recorded expenses with payment status', pdfEquipmentSubtitle: 'All equipment records and assignment details', pdfClassSummarySubtitle: 'Overview of all classes', pdfFinancialSubtitle: 'Complete financial overview', pdfLogoWidth: 40, pdfLogoHeight: 40, pdfHeaderColor: '#0ea5e9', pdfBodyColor: '#1e293b', pdfTableHeaderColor: '#0ea5e9', pdfAccentColor: '#4361ee', pdfTitleSize: 22, pdfBodySize: 10, offerTitle: 'Offer Letter', offerIntro: 'Subject: Appointment for the position of', offerPoints: 'Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies and code of conduct.\nSalary & Duties | Salary and duties will be as discussed and recorded by the administration.', offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.', offerSignatory: 'Principal / Administrator', offerAck: 'I acknowledge and accept the terms and conditions mentioned above.' })} className="text-xs text-gray-400 hover:text-cyan-400 underline">Reset all PDF settings to default</button>
       </div>
 
       <button onClick={() => p.setShowModal(false)} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white p-3 rounded-lg font-bold">Save Settings</button>
@@ -488,26 +490,109 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1"><label className="text-xs text-cyan-400">PAN / Tax ID</label><input placeholder="PAN / Tax ID" value={p.employeeForm.panTaxId || ''} onChange={e => p.setEmployeeForm({ ...p.employeeForm, panTaxId: e.target.value.toUpperCase() })} className={inputCls + ' uppercase'} /></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input placeholder="Address" value={p.employeeForm.address} onChange={e => p.setEmployeeForm({ ...p.employeeForm, address: e.target.value })} className={inputCls} /></div>
 
-        <div className="space-y-4 col-span-2 border-t border-gray-700 pt-4 mt-2">
-          <div className="flex items-center justify-between">
-            <h4 className="text-base font-bold text-purple-400">Offer Report / Offer Letter</h4>
-            <span className="text-xs text-gray-500">Editable PDF content</span>
-          </div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">Offer Title</label><input value={(p.employeeForm as any).offerTitle || 'Offer Letter'} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), offerTitle: e.target.value }))} className={inputCls} /></div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">Intro Paragraph</label><textarea value={(p.employeeForm as any).offerIntro || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), offerIntro: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-20" placeholder="Opening paragraph for the offer letter..." /></div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">Offer Points / Conditions <span className="text-gray-500">(one point per line)</span></label><textarea value={(p.employeeForm as any).offerPoints || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), offerPoints: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-32" placeholder={"Appointment is subject to document verification.\nEmployee must follow school policies.\nSalary and duties as discussed."} /></div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">Additional Terms</label><textarea value={(p.employeeForm as any).offerTerms || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), offerTerms: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-20" placeholder="Final terms, validity, joining formalities..." /></div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">Signatory</label><input value={(p.employeeForm as any).offerSignatory || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), offerSignatory: e.target.value }))} className={inputCls} placeholder="Principal / Administrator" /></div>
-        </div>
       </div>
       <button onClick={p.handleSaveEmployee} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Employee' : 'Update Employee'}</button>
     </div>
   );
 
+  const parseOfferPoints = (raw: string): { t: string; d: string[] }[] =>
+    raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      if (l === '_blank_') return { t: '', d: [] };
+      const idx = l.indexOf('|');
+      if (idx > -1) {
+        const descRaw = l.substring(idx + 1).trim();
+        return { t: l.substring(0, idx).trim(), d: descRaw ? descRaw.split('::').map(s => s.trim()) : [''] };
+      }
+      return { t: l, d: [] };
+    });
+
+  const serializePoints = (pts: { t: string; d: string[] }[]): string =>
+    pts.map(x => {
+      if (!x.t && x.d.length === 0) return '_blank_';
+      const desc = x.d.join(' :: ');
+      return x.t + (desc || x.d.length > 0 ? ' | ' + desc : '');
+    }).join('\n');
+
+  const renderOfferLetterSettings = () => {
+    const pts = parseOfferPoints(p.schoolSettings.offerPoints || '');
+    const addPoint = () => {
+      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
+      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints([...cur, { t: '', d: [] }]) });
+    };
+    const updateTitle = (i: number, val: string) => {
+      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
+      const next = cur.map((x, idx) => idx === i ? { ...x, t: val } : x);
+      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
+    };
+    const addDesc = (i: number) => {
+      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
+      const next = cur.map((x, idx) => idx === i ? { ...x, d: [...x.d, ''] } : x);
+      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
+    };
+    const updateDesc = (i: number, di: number, val: string) => {
+      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
+      const next = cur.map((x, idx) => idx === i ? { ...x, d: x.d.map((dd, ddi) => ddi === di ? val : dd) } : x);
+      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
+    };
+    const removeDesc = (i: number, di: number) => {
+      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
+      const next = cur.map((x, idx) => idx === i ? { ...x, d: x.d.filter((_, ddi) => ddi !== di) } : x);
+      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
+    };
+    const removePoint = (i: number) => {
+      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
+      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(cur.filter((_, idx) => idx !== i)) });
+    };
+
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-indigo-400 bg-clip-text text-transparent">Offer Letter Settings</h2>
+          <button onClick={() => p.setShowOfferLetterSettings(false)} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={24} /></button>
+        </div>
+        <div className="space-y-4">
+          <div className="space-y-1"><label className="text-xs text-cyan-400">Offer Title</label><input value={p.schoolSettings.offerTitle || 'Offer Letter'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerTitle: e.target.value })} className={inputCls} /></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">Subject</label><textarea value={p.schoolSettings.offerIntro || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerIntro: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm h-20" placeholder="Subject: Appointment for the position of..." /></div>
+
+          {/* Dynamic Points Builder */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-cyan-400 font-semibold">Points / Conditions</label>
+              <button onClick={addPoint} className="flex items-center gap-1 text-xs bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-3 py-1.5 rounded-lg font-semibold"><FiPlus size={14} /> Add Point</button>
+            </div>
+            {pts.length === 0 && <p className="text-xs text-gray-500 italic">No points added. Click "Add Point" to create one.</p>}
+            {pts.map((pt, i) => (
+              <div key={i} className="flex gap-2 items-start bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+                <div className="flex-1 space-y-2">
+                  <input value={pt.t} onChange={e => updateTitle(i, e.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm" placeholder="Point title" />
+                  {pt.d.map((desc, di) => (
+                    <div key={di} className="flex gap-1 items-center">
+                      <span className="text-gray-500 text-xs shrink-0">•</span>
+                      <input value={desc} onChange={e => updateDesc(i, di, e.target.value)} className="flex-1 p-1.5 bg-gray-900 rounded-lg border border-gray-700 text-white text-xs" placeholder={`Description ${di + 1}`} />
+                      <button onClick={() => removeDesc(i, di)} className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
+                    </div>
+                  ))}
+                  <button onClick={() => addDesc(i)} className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"><FiPlus size={12} /> Add description</button>
+                </div>
+                <button onClick={() => removePoint(i)} className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded mt-1"><FiX size={16} /></button>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-1"><label className="text-xs text-cyan-400">Additional Terms</label><textarea value={p.schoolSettings.offerTerms || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerTerms: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-20" placeholder="Final terms, validity, joining formalities..." /></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">Acknowledgement <span className="text-gray-500">(shown before signature)</span></label><textarea value={p.schoolSettings.offerAck || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerAck: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-16" placeholder="I acknowledge and accept the terms..." /></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">Signatory</label><input value={p.schoolSettings.offerSignatory || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerSignatory: e.target.value })} className={inputCls} placeholder="Principal / Administrator" /></div>
+        </div>
+        <button onClick={() => p.setShowOfferLetterSettings(false)} className="w-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-3 rounded-lg font-bold">Done</button>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     if (p.showClassMgmt) return renderClassMgmt();
     if (p.showPackageMgmt) return renderPackageMgmt();
     if (p.showDocumentMgmt) return renderDocumentMgmt();
+    if (p.showOfferLetterSettings) return renderOfferLetterSettings();
     if (p.showSettings) return renderSettings();
     switch (p.activeTab) {
       case 'students': return renderStudentForm();

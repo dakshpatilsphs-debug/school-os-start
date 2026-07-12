@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   FiUsers, FiUser, FiDollarSign, FiTrendingDown, FiBarChart2, FiPlus, FiEdit2,
   FiTrash2, FiDownload, FiUpload, FiFileText, FiX, FiCheck, FiAlertCircle,
-  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiBell, FiClock, FiAlertTriangle
+  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiBell, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp
 } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -28,10 +28,9 @@ import { getColors as getPDFColors, getPDFColorsFromSettings, drawHeader as pdfH
 import { AppModals } from './Modals';
 import { AttendanceSection } from './Attendance';
 import { ScheduleSection } from './Schedule';
-import SalarySlip from './components/SalarySlip';
 import type { SalarySlipData } from './salarySlipTypes';
 
-type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'reminders' | 'schedule';
+type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'reminders' | 'schedule' | 'correction';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -55,8 +54,6 @@ const App: React.FC = () => {
   const [firebaseErrorLog, setFirebaseErrorLog] = useState<{ time: string; code: string; message: string; context: string }[]>([]);
   const [timeRange, setTimeRange] = useState('month');
   const [showImageModal, setShowImageModal] = useState(false);
-  const [showSalarySlip, setShowSalarySlip] = useState(false);
-  const [salarySlipEmployee, setSalarySlipEmployee] = useState<Employee | null>(null);
   const [previewImage, setPreviewImage] = useState('');
   const [uploading, setUploading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -87,6 +84,13 @@ const App: React.FC = () => {
       pdfAccentColor: '#4361ee',
       pdfTitleSize: 22,
       pdfBodySize: 10,
+      // Offer Letter defaults (global — same for all employees)
+      offerTitle: 'Offer Letter',
+      offerIntro: 'Subject: Appointment for the position of',
+      offerPoints: 'Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies and code of conduct.\nSalary & Duties | Salary and duties will be as discussed and recorded by the administration.',
+      offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.',
+      offerSignatory: 'Principal / Administrator',
+      offerAck: 'I acknowledge and accept the terms and conditions mentioned above.',
     };
     if (saved) {
       const parsed = JSON.parse(saved);
@@ -99,6 +103,7 @@ const App: React.FC = () => {
   const [classes, setClasses] = useState<string[]>(() => { const s = localStorage.getItem('schoolClasses'); return s ? JSON.parse(s) : ['NUR.', 'JR.KG', 'SR.KG', '1 ST',"2 ND","3 RD","4 TH",]; });
   const [documentOptions, setDocumentOptions] = useState<string[]>(() => { const s = localStorage.getItem('schoolDocumentOptions'); return s ? JSON.parse(s) : ['Birth Certificate', 'Aadhaar Card', 'XEROX BIRTH CERTIFICATE', 'PHOTO', 'PARENT Photo', 'Parent ID Proof','LEAVING CERTIFICATE','ADDMISSION FORM']; });
   const [showDocumentMgmt, setShowDocumentMgmt] = useState(false);
+  const [showOfferLetterSettings, setShowOfferLetterSettings] = useState(false);
   const [newDocumentName, setNewDocumentName] = useState('');
   const [packages, setPackages] = useState<{ name: string; amount: number }[]>(() => { const s = localStorage.getItem('schoolPackages'); return s ? JSON.parse(s) : [{ name: 'NUR', amount: 12000 }, { name: 'JR.KG', amount: 13000 }, { name: 'SR.KG', amount:13000 }, { name: '1 ST', amount:  14000},{ name: '2 ND', amount:  15000},{ name: '3 RD', amount:  16000},{ name: '4 TH', amount:  16000},]; });
   const [showClassMgmt, setShowClassMgmt] = useState(false);
@@ -115,7 +120,7 @@ const App: React.FC = () => {
   const [feeClassFilter, setFeeClassFilter] = useState('');
 
   const [expenseForm, setExpenseForm] = useState<Expense>({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' });
-  const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '', offerTitle: 'Offer Letter', offerIntro: 'We are pleased to offer you the following position at our school.', offerPoints: 'Appointment is subject to verification of documents.\nYou are expected to follow all school policies and code of conduct.\nSalary and duties will be as discussed and recorded by the administration.', offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.', offerSignatory: 'Principal / Administrator' } as any);
+  const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
   const [equipmentForm, setEquipmentForm] = useState<Equipment>({ autoId: generateAutoId('Q'), name: '', category: 'Furniture', assignedToType: 'school', assignedToId: '', assignedToName: 'School', quantity: 1, condition: 'Good', purchaseDate: '', value: 0, status: 'Pending', notes: '' });
   const [equipmentPersonTypeFilter, setEquipmentPersonTypeFilter] = useState<'all' | 'student' | 'teacher'>('all');
   const [equipmentPersonIdFilter, setEquipmentPersonIdFilter] = useState('');
@@ -148,7 +153,7 @@ const App: React.FC = () => {
     const msg = getFirebaseErrorMessage(error, fallback);
     showNotification(msg, 'error');
   }, [showNotification]);
-  const loadData = useCallback(async () => { try { const [s, f, e, emp, eq, att, hol, rem] = await Promise.all([getStudents(), getFees(), getExpenses(), getEmployees(), getEquipments(), getAttendance(), getHolidays(), getReminders()]); setStudents(s as Student[]); setFees(f as Fee[]); setExpenses(e as Expense[]); setEmployees(emp as Employee[]); setEquipments(eq as Equipment[]); setAttendance(att as Att[]); setHolidays(hol as Holiday[]); setReminders(rem as Reminder[]); } catch (error) { showFirebaseError(error, 'Failed to load data'); } }, [showFirebaseError]);
+  const loadData = useCallback(async () => { try { const [s, f, e, emp, eq, att, hol, rem] = await Promise.all([getStudents(), getFees(), getExpenses(), getEmployees(), getEquipments(), getAttendance(), getHolidays(), getReminders()]); setStudents((s as Student[]).sort((a, b) => { const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER; const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER; if (ao !== bo) return ao - bo; return (a.name || '').localeCompare(b.name || ''); })); setFees(f as Fee[]); setExpenses(e as Expense[]); setEmployees(emp as Employee[]); setEquipments(eq as Equipment[]); setAttendance(att as Att[]); setHolidays(hol as Holiday[]); setReminders(rem as Reminder[]); } catch (error) { showFirebaseError(error, 'Failed to load data'); } }, [showFirebaseError]);
   const handleRefresh = async () => { setRefreshing(true); await loadData(); setTimeout(() => { setRefreshing(false); showNotification('Data refreshed successfully', 'success'); }, 500); };
 
   // Generate read-only share link and copy to clipboard
@@ -649,27 +654,15 @@ const App: React.FC = () => {
   const formatStudentAutoId = (num: number) => `STU-${String(num).padStart(3, '0')}`;
 
   const getNextAvailableStudentAutoId = (sourceStudents: Student[] = students) => {
-    const usedNumbers = sourceStudents
-      .map(s => {
-        // Accept STU-001, STU001, stu-1, etc. and parse the trailing number safely.
+    const maxNum = sourceStudents
+      .reduce((max, s) => {
         const match = String(s.autoId || '').trim().match(/(\d+)$/);
-        return match ? parseInt(match[1], 10) : 0;
-      })
-      .filter(n => n > 0 && Number.isFinite(n));
-
-    const used = new Set(usedNumbers);
-    let next = 1;
-    while (used.has(next)) next++;
-    return formatStudentAutoId(next);
+        const num = match ? parseInt(match[1], 10) : 0;
+        return num > max ? num : max;
+      }, 0);
+    return formatStudentAutoId(maxNum + 1);
   };
 
-  const generateStudentIds = async (studentClass: string) => {
-    // Fetch fresh students to avoid duplicate IDs after refresh/delete/import.
-    const latestStudents = (await getStudents()) as Student[];
-    const autoId = getNextAvailableStudentAutoId(latestStudents);
-    const rollNumber = generateRollNumber(studentClass);
-    return { autoId, rollNumber };
-  };
 
   const resetStudentForm = () => {
     setStudentForm({
@@ -702,6 +695,7 @@ const App: React.FC = () => {
     setShowClassMgmt(false);
     setShowPackageMgmt(false);
     setShowDocumentMgmt(false);
+    setShowOfferLetterSettings(false);
   }, []);
 
   const closeModal = useCallback(() => {
@@ -720,14 +714,9 @@ const App: React.FC = () => {
         final.autoId = currentRecord.autoId;
         await updateStudent(currentRecord.id, final);
       } else {
-        const { autoId, rollNumber } = await generateStudentIds(final.class || '');
-
-        const latestStudents = (await getStudents()) as Student[];
-        const duplicate = latestStudents.some(s => String(s.autoId || '').toLowerCase() === autoId.toLowerCase());
-        if (duplicate) {
-          showNotification('Auto ID conflict detected. Please refresh and try again.', 'error');
-          return;
-        }
+        const seq = await getNextSequentialId('students');
+        const autoId = formatStudentAutoId(seq);
+        const rollNumber = generateRollNumber(final.class || '');
 
         final.autoId = autoId;
         final.rollNumber = rollNumber;
@@ -858,7 +847,7 @@ const App: React.FC = () => {
         const emp = autoSalaryEmployees[i];
         if (!emp.salary || emp.salary <= 0) { skipped++; continue; }
         const seq = await getNextSequentialId('expenses');
-        await addExpense({ autoId: 'EXP-' + String(seq + i).padStart(3, '0'), category: 'Salaries', amount: emp.salary || 0, description: `AUTO-SALARY-${monthKey} | Monthly salary for ${emp.name}`, date: getTodayISO(), paidTo: emp.name, employeeId: emp.autoId, status: 'pending', billUrl: '' });
+        await addExpense({ autoId: 'EXP-' + String(seq).padStart(3, '0'), category: 'Salaries', amount: emp.salary || 0, description: `AUTO-SALARY-${monthKey} | Monthly salary for ${emp.name}`, date: getTodayISO(), paidTo: emp.name, employeeId: emp.autoId, status: 'pending', billUrl: '' });
         created++;
       }
       if (manual) showNotification(created > 0 ? `Salary refresh created ${created} salary expense(s)` : 'No salary refresh needed today', 'success');
@@ -888,7 +877,7 @@ const App: React.FC = () => {
       if (modalType === 'edit' && currentRecord?.id) await updateEmployee(currentRecord.id, final);
       else { const seq = await getNextSequentialId('employees'); final.autoId = 'EMP-' + String(seq).padStart(3, '0'); await addEmployee(final); }
       closeModal();
-      setEmployeeForm({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '', offerTitle: 'Offer Letter', offerIntro: 'We are pleased to offer you the following position at our school.', offerPoints: 'Appointment is subject to verification of documents.\nYou are expected to follow all school policies and code of conduct.\nSalary and duties will be as discussed and recorded by the administration.', offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.', offerSignatory: 'Principal / Administrator' } as any);
+      setEmployeeForm({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
       await loadData();
       showNotification('Employee saved successfully', 'success');
     } catch (error) { showFirebaseError(error, 'Failed to save employee'); }
@@ -896,76 +885,213 @@ const App: React.FC = () => {
 
 
   const exportEmployeeOfferPDF = (employee: Employee) => {
-    const emp: any = employee;
     const doc = new jsPDF();
-    const pw = 210;
-    const ph = 297;
-    const c = getPDFColorsFromSettings(schoolSettings);
-    const title = emp.offerTitle || 'Offer Letter';
-    const intro = emp.offerIntro || 'We are pleased to offer you the following position at our school.';
-    const points = String(emp.offerPoints || '').split('\n').map((p: string) => p.trim()).filter(Boolean);
-    const terms = emp.offerTerms || 'This offer is valid subject to acceptance and completion of joining formalities.';
-    const signatory = emp.offerSignatory || 'Principal / Administrator';
+    const pw = 210, ph = 297, ml = 16, mr = pw - ml, cw = mr - ml;
+    const padLg = 6.5;
 
-    pdfHeader(doc, title, schoolSettings.pdfEmployeeSubtitle || 'Employee offer report', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+    // ── Color helpers (same as salary slip) ──
+    const hexToRgb = (hex: string): [number, number, number] => {
+      const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return r ? [parseInt(r[1], 16), parseInt(r[2], 16), parseInt(r[3], 16)] : [14, 165, 233];
+    };
+    const primary: [number, number, number] = hexToRgb(schoolSettings.primaryColor || '#0ea5e9');
+    const [pr, pg, pb] = primary;
+    const accent: [number, number, number] = hexToRgb(schoolSettings.secondaryColor || '#4361ee');
 
-    let y = 42;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(...c.dark);
-    doc.text(title, pw / 2, y, { align: 'center' });
-    y += 12;
+    // ── Design tokens (matching SalarySlip.css) ──
+    const sBorder: [number, number, number] = [226, 232, 240];
+    const sText: [number, number, number] = [30, 41, 59];
+    const sTextSec: [number, number, number] = [100, 116, 139];
+    const sTextMuted: [number, number, number] = [148, 163, 184];
+    const sPrimary: [number, number, number] = primary;
+    const sPrimaryDark: [number, number, number] = [Math.max(0, pr - 12), Math.max(0, pg - 33), Math.max(0, pb - 34)];
+    const sPrimaryLight: [number, number, number] = [Math.round(pr * 0.15 + 224 * 0.85), Math.round(pg * 0.15 + 242 * 0.85), Math.round(pb * 0.15 + 254 * 0.85)];
+    const sPrimaryBg: [number, number, number] = [Math.round(pr * 0.07 + 240 * 0.93), Math.round(pg * 0.07 + 249 * 0.93), Math.round(pb * 0.07 + 255 * 0.93)];
+    const sBgAlt: [number, number, number] = [248, 250, 252];
+    const white: [number, number, number] = [255, 255, 255];
 
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.setTextColor(...c.muted);
-    doc.text(`Date: ${new Date().toLocaleDateString('en-IN')}`, 10, y);
-    y += 10;
+    const trunc = (text: string, maxLen: number) => !text ? '-' : (text.length > maxLen ? text.substring(0, maxLen) + '...' : text);
+    const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
 
-    doc.setFillColor(...c.lighter);
-    doc.roundedRect(10, y, pw - 20, 42, 3, 3, 'F');
-    doc.setFillColor(...c.primary);
-    doc.rect(10, y, 3, 42, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...c.primary);
-    doc.text('EMPLOYEE DETAILS', 18, y + 8);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...c.dark);
-    doc.text(`Name: ${employee.name || '-'}`, 18, y + 17);
-    doc.text(`Employee ID: ${employee.autoId || '-'}`, 106, y + 17);
-    doc.text(`Role: ${employee.role || '-'}`, 18, y + 26);
-    doc.text(`Department: ${employee.department || '-'}`, 106, y + 26);
-    doc.text(`Salary: ${pdfMoney(employee.salary || 0)}`, 18, y + 35);
-    doc.text(`Joining Date: ${employee.joinDate || '-'}`, 106, y + 35);
-    y += 56;
+    // ── Data ──
+    const subject = schoolSettings.offerIntro || '';
+    const pointsRaw = String(schoolSettings.offerPoints || '').split('\n').map((p: string) => p.trim()).filter(Boolean);
+    const terms = schoolSettings.offerTerms || 'This offer is valid subject to acceptance and completion of joining formalities.';
+    const ack = schoolSettings.offerAck || '';
+    const signatory = schoolSettings.offerSignatory || 'Principal / Administrator';
 
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.setTextColor(...c.dark);
-    const introLines = doc.splitTextToSize(intro, pw - 20);
-    doc.text(introLines, 10, y);
-    y += introLines.length * 5 + 8;
-
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5); doc.setTextColor(...c.primary);
-    doc.text('Offer Terms / Points', 10, y);
-    y += 8;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...c.dark);
-    (points.length ? points : ['Offer points can be edited from the employee form.']).forEach((point: string, i: number) => {
-      const lines = doc.splitTextToSize(`${i + 1}. ${point}`, pw - 26);
-      if (y + lines.length * 5 > ph - 35) { doc.addPage(); pdfHeader(doc, title, schoolSettings.pdfEmployeeSubtitle || 'Employee offer report', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings); y = 38; }
-      doc.text(lines, 14, y);
-      y += lines.length * 5 + 3;
+    // Parse points: "Title | Desc1 :: Desc2"
+    const points = pointsRaw.map(p => {
+      const idx = p.indexOf('|');
+      if (idx > -1) {
+        const descPart = p.substring(idx + 1).trim();
+        return { t: p.substring(0, idx).trim(), d: descPart ? descPart.split('::').map((s: string) => s.trim()).filter(Boolean) : [] };
+      }
+      return { t: p, d: [] };
     });
 
-    y += 4;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(...c.primary);
-    doc.text('Additional Terms', 10, y);
-    y += 7;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...c.dark);
-    const termLines = doc.splitTextToSize(terms, pw - 20);
-    doc.text(termLines, 10, y);
-    y += termLines.length * 5 + 22;
+    // ═══ 1. HEADER (salary slip style) ═══
+    let y = 20;
+    let logoW = 0;
+    if (schoolSettings.schoolLogo) {
+      try { doc.addImage(schoolSettings.schoolLogo, 'PNG', ml, 13, 18, 18); logoW = 22; } catch (e) {}
+    }
+    const nameX = logoW > 0 ? ml + logoW : ml;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(...sPrimaryDark);
+    doc.text(trunc((schoolSettings.schoolName || 'School OS').toUpperCase(), 40), nameX, 19);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+    doc.text(trunc([schoolSettings.address || '', schoolSettings.phone || '', schoolSettings.email || ''].filter(Boolean).join(' | '), 70), nameX, 25);
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sTextSec);
+    doc.text('DATE:', mr, 15, { align: 'right' });
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
+    doc.text(new Date().toLocaleDateString('en-IN'), mr, 21.5, { align: 'right' });
+    doc.setDrawColor(...sPrimary); doc.setLineWidth(0.5); doc.line(ml, 32, mr, 32);
 
-    doc.setDrawColor(...c.border); doc.line(10, y, 72, y); doc.line(pw - 72, y, pw - 10, y);
-    doc.setFontSize(8.5); doc.setTextColor(...c.muted);
-    doc.text('Employee Signature', 16, y + 6);
-    doc.text(signatory, pw - 66, y + 6);
+    // ═══ 2. OFFER LETTER BAR (salary slip employee bar style) ═══
+    doc.setFillColor(...sPrimaryBg); doc.setDrawColor(...sPrimary); doc.setLineWidth(0.1);
+    doc.rect(ml, 39, cw, 20, 'FD');
+    doc.setFillColor(...sPrimary); doc.rect(ml, 39, 1, 20, 'F');
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
+    doc.text('Employee: ' + employee.name, ml + 1 + padLg, 51);
 
-    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    const pillTxt = 'OFFER LETTER';
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+    const pillW = doc.getTextWidth(pillTxt) + 4 * 2;
+    const pillX = mr - padLg - pillW;
+    doc.setFillColor(...sPrimaryLight); doc.setDrawColor(...sPrimaryLight);
+    doc.roundedRect(pillX, 44, pillW, 10, 6, 6, 'FD');
+    doc.setTextColor(...sPrimary); doc.text(pillTxt, pillX + pillW / 2, 51.5, { align: 'center' });
+
+    // ═══ 3. EMPLOYEE DETAILS CARD (like salary slip info cards) ═══
+    y = 64;
+    const cardH = 48;
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+    doc.roundedRect(ml, y, cw, cardH, 3, 3, 'S');
+    doc.setFillColor(...sBgAlt);
+    doc.roundedRect(ml, y, cw, 11, 3, 3, 'F');
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.1);
+    doc.line(ml, y + 11, mr, y + 11);
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
+    doc.text('EMPLOYEE DETAILS', ml + padLg, y + 7.5);
+
+    const rowX = ml + padLg;
+    const rowW = cw - padLg * 2;
+    const halfW = rowW / 2;
+    const drawRow = (label: string, val: string, cx: number, cy: number) => {
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text(label, cx, cy);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+      doc.text(trunc(val, 22), cx + halfW - padLg * 2, cy, { align: 'right' });
+    };
+    drawRow('Employee ID', employee.autoId || '-', rowX, y + 22);
+    drawRow('Designation', employee.role || '-', rowX + halfW, y + 22);
+    drawRow('Department', employee.department || '-', rowX, y + 31.5);
+    drawRow('Joining Date', employee.joinDate || '-', rowX + halfW, y + 31.5);
+    drawRow('Salary', money(employee.salary || 0), rowX, y + 41);
+    drawRow('Status', employee.status || '-', rowX + halfW, y + 41);
+    y += cardH + 10;
+
+    // ═══ 4. SUBJECT ═══
+    if (subject) {
+      const subLines = doc.splitTextToSize(subject, cw);
+      if (y + subLines.length * 5 > ph - 35) { doc.addPage(); y = 28; }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+      doc.text(subLines, ml, y);
+      y += subLines.length * 5 + 10;
+    }
+
+    // ═══ 5. OFFER POINTS (Terms & Conditions) ═══
+    if (points.length) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...sPrimaryDark);
+      doc.text('Terms & Conditions', ml, y);
+      y += 10;
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i];
+        const tl = doc.splitTextToSize(pt.t, cw - 8);
+        if (y + (pt.d ? tl.length * 5 + 4 : tl.length * 5) + 4 > ph - 35) { doc.addPage(); y = 28; }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...sPrimaryDark);
+        doc.text(`${i + 1}. ${pt.t}`, ml + 4, y);
+        y += tl.length * 5 + 3;
+        if (pt.d && pt.d.length > 0) {
+          for (const desc of pt.d) {
+            const dl = doc.splitTextToSize('• ' + desc, cw - 12);
+            if (y + dl.length * 5 > ph - 35) { doc.addPage(); y = 28; }
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...sTextSec);
+            doc.text(dl, ml + 10, y);
+            y += dl.length * 5 + 3;
+          }
+          y += 2;
+        }
+      }
+      y += 4;
+    }
+
+    // ═══ 6. ADDITIONAL TERMS ═══
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...sPrimaryDark);
+    doc.text('Additional Terms', ml, y);
+    y += 10;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...sText);
+    const termLines = doc.splitTextToSize(terms, cw);
+    if (y + termLines.length * 5 > ph - 35) { doc.addPage(); y = 28; }
+    doc.text(termLines, ml, y);
+    y += termLines.length * 5 + 14;
+
+    // ═══ 7. ACKNOWLEDGEMENT (new page) ═══
+    if (ack) {
+      doc.addPage(); y = 28;
+      const ackLines = doc.splitTextToSize(ack, cw - 16);
+      const ackH = 18 + ackLines.length * 5.5;
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+      doc.roundedRect(ml, y, cw, ackH, 3, 3, 'S');
+      doc.setFillColor(...sBgAlt);
+      doc.roundedRect(ml, y, cw, ackH, 3, 3, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...sPrimary);
+      doc.text('ACKNOWLEDGEMENT', ml + padLg, y + 8);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...sText);
+      doc.text(ackLines, ml + 8, y + 18);
+      y += ackH + 12;
+    }
+
+    // ═══ 8. SIGNATURE ── salary slip style ── ═══
+    const SIG_LINE_WIDTH = 55;
+    const SIG_GAP_ABOVE = 55;
+    const SIG_LABEL_OFFSET = 6;
+    const SIG_BLOCK_HEIGHT = SIG_GAP_ABOVE + SIG_LABEL_OFFSET + 10;
+    const totalSigH = SIG_BLOCK_HEIGHT + 12;
+
+    if (y + totalSigH > ph - 35) { doc.addPage(); y = 28; }
+
+    const forSchool = 'For ' + (schoolSettings.schoolName || 'School OS');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...sText);
+    const forSchoolLines = doc.splitTextToSize(forSchool, cw);
+    doc.text(forSchoolLines, pw / 2, y + 4, { align: 'center' });
+    y += 8;
+
+    const leftColX = ml;
+    const rightColX = mr - SIG_LINE_WIDTH;
+
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+    doc.line(leftColX, y + SIG_GAP_ABOVE, leftColX + SIG_LINE_WIDTH, y + SIG_GAP_ABOVE);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...sTextSec);
+    doc.text('Employee Signature', leftColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...sPrimary);
+    doc.text(employee.name, leftColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET + 10);
+
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+    doc.line(rightColX, y + SIG_GAP_ABOVE, rightColX + SIG_LINE_WIDTH, y + SIG_GAP_ABOVE);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...sTextSec);
+    doc.text('Authorised Signatory', rightColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...sPrimary);
+    doc.text(signatory, rightColX, y + SIG_GAP_ABOVE + SIG_LABEL_OFFSET + 10);
+
+    // ═══ 9. FOOTER ═══
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+    doc.line(ml, 273, mr, 273);
+    doc.setFontSize(8.5); doc.setTextColor(...sTextMuted); doc.setFont('helvetica', 'normal');
+    doc.text('This is a computer-generated offer letter.', pw / 2, 278, { align: 'center' });
+
     doc.save(`Offer_Letter_${employee.autoId || employee.name}_${new Date().toISOString().split('T')[0]}.pdf`);
-    showNotification('Offer report PDF generated', 'success');
+    showNotification('Offer letter PDF generated', 'success');
   };
 
   const drawSalarySlipPDF = (doc: any, emp: Employee, currentMonth: string, monthName: string, casualLeavesUsed: number = 0, salaryData?: SalarySlipData) => {
@@ -1094,13 +1220,27 @@ const App: React.FC = () => {
       ]);
       y = y + cardH + padMd + 2;
 
-      // ============ 4. SALARY SUMMARY CARD ============
-      const sumRowsArr: [string, string][] = [
+      // ============ 4. SALARY DETAILS CARD (two columns) ============
+      const earnItems: [string, string][] = [
         ['Basic Salary', money(monthlySalary)],
+        ['House Rent Allowance', 'Rs 0'],
+        ['Travelling Allowance', 'Rs 0'],
+        ['Medical Allowance', 'Rs 0'],
+        ['Conveyance Allowance', 'Rs 0'],
       ];
-      if (sd && sd.salary.allowances > 0) sumRowsArr.push(['Allowances', money(sd.salary.allowances)]);
-      if (sd && sd.salary.deductions > 0) sumRowsArr.push(['Deductions', money(sd.salary.deductions)]);
-      const sumH = tBarH + 7 + sumRowsArr.length * 8.5 + padSm + 2 + 1 + padSm + 6;
+      const deductItems: [string, string][] = [
+        ['EPF(%)', 'Rs 0'],
+        ['PF(%)', 'Rs 0'],
+        ['TDS', 'Rs 0'],
+        ['Others(-)', 'Rs 0'],
+        ['PTAX', 'Rs 0'],
+      ];
+      const itemCount = Math.max(earnItems.length, deductItems.length);
+      // Summary table height (centered box below items)
+      const sumTableW = CW * 0.72;
+      const sumTableX = ML + (CW - sumTableW) / 2;
+      const sumContH = padSm + 8.5 + 8.5 + padSm + 1 + padSm + 10 + padSm;
+      const sumH = tBarH + 7 + (1 + itemCount) * 8.5 + padSm + sumContH;
 
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
       doc.roundedRect(ML, y, CW, sumH, 3, 3, 'S');
@@ -1109,24 +1249,64 @@ const App: React.FC = () => {
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.1);
       doc.line(ML, y + tBarH, MR, y + tBarH);
       doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
-      doc.text('SALARY SUMMARY', ML + padLg, y + 7.5);
+      doc.text('SALARY DETAILS', ML + padLg, y + 7.5);
+
+      const colW = (CW - padLg * 3) / 2;
+      const earnX = ML + padLg;
+      const deductX = earnX + colW + padLg;
 
       let sy = y + tBarH + 7;
-      sumRowsArr.forEach(([lbl, val]) => {
-        doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
-        doc.text(lbl, ML + padLg, sy);
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
-        doc.text(val, MR - padLg, sy, { align: 'right' });
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sTextSec);
+      doc.text('EARNINGS', earnX, sy);
+      doc.text('DEDUCTIONS', deductX, sy);
+      sy += 8.5;
+
+      for (let i = 0; i < itemCount; i++) {
+        if (i < earnItems.length) {
+          doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+          doc.text(earnItems[i][0], earnX, sy);
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+          doc.text(earnItems[i][1], earnX + colW - padLg * 2, sy, { align: 'right' });
+        }
+        if (i < deductItems.length) {
+          doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+          doc.text(deductItems[i][0], deductX, sy);
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+          doc.text(deductItems[i][1], deductX + colW - padLg * 2, sy, { align: 'right' });
+        }
         sy += 8.5;
-      });
+      }
+
       sy += padSm;
+
+      // ═══════ Summary table (centered) ═══════
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
-      doc.line(ML + padLg, sy, MR - padLg, sy);
-      sy += padSm + 1;
+      doc.roundedRect(sumTableX, sy, sumTableW, sumContH, 3, 3, 'S');
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(sumTableX, sy, sumTableW, sumContH, 3, 3, 'F');
+
+      let ss = sy + padSm + 7;
+      const valX = sumTableX + sumTableW - padLg;
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text('Gross Earnings (A)', sumTableX + padLg, ss);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+      doc.text(money(monthlySalary), valX, ss, { align: 'right' });
+      ss += 8.5;
+
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text('Gross Deductions (B)', sumTableX + padLg, ss);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+      doc.text('Rs 0', valX, ss, { align: 'right' });
+      ss += padSm;
+
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+      doc.line(sumTableX + padLg, ss, sumTableX + sumTableW - padLg, ss);
+      ss += padSm;
+
       doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
-      doc.text('Net Salary (Earned)', ML + padLg, sy);
-      doc.setFontSize(15); doc.setTextColor(...sPrimaryDark);
-      doc.text(money(earnedSalary), MR - padLg, sy, { align: 'right' });
+      doc.text('Net Pay (A-B)', sumTableX + padLg, ss + 7);
+      doc.setFontSize(13); doc.setTextColor(...sPrimaryDark);
+      doc.text(money(earnedSalary), valX, ss + 7, { align: 'right' });
 
       // ============ 5. FOOTER ============
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -1925,6 +2105,7 @@ const App: React.FC = () => {
 
         let success = 0, failed = 0;
         const errors: string[] = [];
+        const baseSeq = await getNextSequentialId(collectionName);
 
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
@@ -1933,7 +2114,7 @@ const App: React.FC = () => {
 
           try {
             let record: any = {};
-            const seq = i + 1;
+            const seq = baseSeq + i;
 
             if (collectionName === 'students') {
               // ===== Smart Package + Amount Resolution =====
@@ -2151,7 +2332,7 @@ const App: React.FC = () => {
     { name: 'Lost', value: equipments.filter(eq => eq.condition === 'Lost').length },
   ].filter(item => item.value > 0);
 
-  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reminders', icon: FiBell, label: 'Reminders' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }];
+  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reminders', icon: FiBell, label: 'Reminders' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }, { id: 'correction', icon: FiEdit2, label: 'Correction' }];
   const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : activeTab === 'students' ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : activeTab === 'reminders' ? 'Reminder Management' : 'Employee Management';
 
   const searchBtn = "flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 px-5 py-3 rounded-xl transition-all";
@@ -2224,18 +2405,6 @@ const App: React.FC = () => {
       )}
       {showImageModal && <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4"><div className="bg-[#1E1E1E] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] flex flex-col"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold text-cyan-400">Bill Preview</h3><button onClick={() => setShowImageModal(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div><div className="flex-1 overflow-auto"><img src={previewImage} alt="Bill" className="w-full rounded-lg" /></div></div></div>}
 
-      {showSalarySlip && salarySlipEmployee && (
-        <div className="fixed inset-0 bg-black/80 flex items-start justify-center z-50 p-4 overflow-y-auto">
-          <div className="relative w-full max-w-3xl my-8">
-            <div className="absolute -top-3 right-0 z-10 flex gap-2">
-              <button onClick={() => { exportEmployeeSalarySlip(salarySlipEmployee, getSalarySlipData(salarySlipEmployee)); }} className="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-2 shadow-lg transition flex items-center gap-1.5 text-xs font-semibold" aria-label="Download PDF"><FiDownload size={16} /><span className="pr-1">PDF</span></button>
-              <button onClick={() => setShowSalarySlip(false)} className="bg-gray-800 hover:bg-gray-700 text-white rounded-full p-2 shadow-lg transition" aria-label="Close salary slip"><FiX size={20} /></button>
-            </div>
-            <SalarySlip data={getSalarySlipData(salarySlipEmployee)} />
-          </div>
-        </div>
-      )}
-
       {/* Reminder Form Modal */}
       {showModal && activeTab === 'reminders' && (
         <div className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -2295,7 +2464,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showModal && activeTab !== 'reminders' && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
+      {showModal && activeTab !== 'reminders' && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
 
       <div className="fixed left-0 top-0 h-full w-72 bg-[#1E1E1E] border-r border-gray-800 p-6 flex flex-col z-40">
         <div className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-8 flex items-center gap-3 shrink-0">
@@ -2316,7 +2485,7 @@ const App: React.FC = () => {
       <div className="ml-72 p-8">
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -2491,9 +2660,9 @@ const App: React.FC = () => {
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Monthly Salary</p><p className="text-2xl font-bold text-yellow-400">₹{getEligibleSalaryEmployees().reduce((s, e) => s + (e.salary || 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Paid</p><p className="text-2xl font-bold text-red-400">₹{employees.reduce((s, e) => s + getEmployeeExpenseInfo(e).totalPaid, 0).toLocaleString()}</p></div>
             </div>
-            <div className="flex flex-col lg:flex-row gap-4">
-              <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, or role..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className={searchBtn + ' hover:border-yellow-500/50 text-yellow-400'} title="Run salary refresh now"><FiRefreshCw size={18} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button><button onClick={() => exportToExcel(employees, 'Employees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportToPDF(employees, 'Employees Report')} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button></div>
+            <div className="flex flex-col lg:flex-row gap-4 items-center">
+              <div className="flex-1 relative w-full"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, or role..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
+              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}<button onClick={() => exportToExcel(employees, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportToPDF(employees, 'Employees Report')} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -2504,7 +2673,7 @@ const App: React.FC = () => {
                   <td className="px-6 py-4 font-semibold text-yellow-400">₹{(e.salary || 0).toLocaleString()}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.phone}</td>
                   <td className="px-6 py-4 hidden lg:table-cell"><span className="text-emerald-400 font-semibold">₹{ei.totalPaid.toLocaleString()}</span><p className="text-xs text-gray-400">{ei.expenseCount} expenses</p></td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${e.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{e.status}</span></td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'employee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit employee"><FiEdit2 size={18} /></button><button onClick={() => { setSalarySlipEmployee(e); setShowSalarySlip(true); }} className="text-yellow-400 hover:text-yellow-300 p-1 hover:bg-yellow-500/20 rounded" title="View Salary Slip"><FiDollarSign size={18} /></button><button onClick={() => exportEmployeeOfferPDF(e)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Offer PDF"><FiFileText size={18} /></button><button onClick={() => handleDelete(e.id!, 'employee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete employee"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'employee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit employee"><FiEdit2 size={18} /></button><button onClick={() => exportEmployeeSalarySlip(e)} className="text-yellow-400 hover:text-yellow-300 p-1 hover:bg-yellow-500/20 rounded" title="Download Salary Slip"><FiDollarSign size={18} /></button><button onClick={() => exportEmployeeOfferPDF(e)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Offer PDF"><FiFileText size={18} /></button><button onClick={() => handleDelete(e.id!, 'employee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete employee"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>);
               })}</tbody>
             </table></div></div>
@@ -2698,6 +2867,28 @@ const App: React.FC = () => {
         )}
 
 
+        {/* ===== CORRECTION / RE-SEQUENCE ===== */}
+        {activeTab === 'correction' && (
+          <CorrectionSection
+            students={students}
+            employees={employees}
+            fees={fees}
+            expenses={expenses}
+            equipments={equipments}
+            classes={classes}
+            isReadOnly={isReadOnly}
+            showNotification={showNotification}
+            updateStudent={updateStudent}
+            updateEmployee={updateEmployee}
+            updateFee={updateFee}
+            updateExpense={updateExpense}
+            updateEquipment={updateEquipment}
+            loadData={loadData}
+            updateStudentAutoIdReferences={updateStudentAutoIdReferences}
+          />
+        )}
+
+
         {/* ===== REPORTS ===== */}
         {activeTab === 'reports' && (
           <div className="space-y-6">
@@ -2865,3 +3056,375 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+
+// ═══════════════════════════════════════════
+// Correction Section — re-sequence AUTO IDs
+// ═══════════════════════════════════════════
+
+type CorrectionEntity = 'students' | 'employees' | 'fees' | 'expenses' | 'equipments';
+
+interface CorrectionSectionProps {
+  students: Student[];
+  employees: Employee[];
+  fees: Fee[];
+  expenses: Expense[];
+  equipments: Equipment[];
+  classes: string[];
+  isReadOnly: boolean;
+  showNotification: (msg: string, type: 'success' | 'error') => void;
+  updateStudent: (id: string, data: any) => Promise<void>;
+  updateEmployee: (id: string, data: any) => Promise<void>;
+  updateFee: (id: string, data: any) => Promise<void>;
+  updateExpense: (id: string, data: any) => Promise<void>;
+  updateEquipment: (id: string, data: any) => Promise<void>;
+  loadData: () => Promise<void>;
+  updateStudentAutoIdReferences: (oldAutoId: string, newAutoId: string, newName?: string) => Promise<void>;
+}
+
+const CorrectionSection: React.FC<CorrectionSectionProps> = ({
+  students, employees, fees, expenses, equipments, classes, isReadOnly,
+  showNotification, updateStudent, updateEmployee, updateFee,
+  updateExpense, updateEquipment, loadData, updateStudentAutoIdReferences,
+}) => {
+  const [entityType, setEntityType] = useState<CorrectionEntity>('students');
+  const [items, setItems] = useState<any[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [filterText, setFilterText] = useState('');
+  const [filterClass, setFilterClass] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  const getSource = () => {
+    switch (entityType) {
+      case 'students':
+        return students.map(s => ({
+          firestoreId: s.id || '', autoId: s.autoId, name: s.name,
+          class: s.class || '', rollNumber: s.rollNumber || '',
+          _oldAutoId: s.autoId, _oldClass: s.class || '', _oldRoll: s.rollNumber || '',
+        }));
+      case 'employees':
+        return employees.map(e => ({ firestoreId: e.id || '', autoId: e.autoId, name: e.name }));
+      case 'fees':
+        return fees.map(f => ({ firestoreId: f.id || '', autoId: f.autoId, name: f.studentName || f.autoId }));
+      case 'expenses':
+        return expenses.map(e => ({ firestoreId: e.id || '', autoId: e.autoId, name: e.paidTo || e.description || e.autoId }));
+      case 'equipments':
+        return equipments.map(eq => ({ firestoreId: eq.id || '', autoId: eq.autoId, name: eq.name }));
+    }
+  };
+
+  useEffect(() => {
+    setItems(getSource());
+    setDirty(false);
+    setFilterText('');
+    setFilterClass('');
+    setSelectedIds(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityType, students, employees, fees, expenses, equipments]);
+
+  const filterable = entityType === 'students';
+  const displayItems = filterable
+    ? items.filter(item => {
+        const matchText = !filterText ||
+          item.name?.toLowerCase().includes(filterText.toLowerCase()) ||
+          item.autoId?.toLowerCase().includes(filterText.toLowerCase()) ||
+          item.class?.toLowerCase().includes(filterText.toLowerCase()) ||
+          item.rollNumber?.toLowerCase().includes(filterText.toLowerCase());
+        const matchClass = !filterClass || item.class === filterClass;
+        return matchText && matchClass;
+      })
+    : items;
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    const all = displayItems.map(i => i.firestoreId);
+    if (all.every(id => selectedIds.has(id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(all));
+    }
+  };
+
+  const assignToSelected = () => {
+    const prefix = entityType === 'students' ? 'STU-' :
+      entityType === 'employees' ? 'EMP-' :
+      entityType === 'fees' ? 'FEE-' :
+      entityType === 'expenses' ? 'EXP-' : 'EQP-';
+    const next = [...items];
+    for (let i = 0; i < next.length; i++) {
+      if (selectedIds.has(next[i].firestoreId)) {
+        next[i] = { ...next[i], autoId: `${prefix}${i + 1}` };
+      }
+    }
+    setItems(next);
+    setDirty(true);
+  };
+
+  const moveItem = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    [next[index], next[target]] = [next[target], next[index]];
+    setItems(next);
+    setDirty(true);
+  };
+
+  const handleDragStart = (index: number) => { setDragIndex(index); };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleDrop = (dropIndex: number) => {
+    if (dragIndex === null || dragIndex === dropIndex) return;
+    const next = [...items];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(dropIndex, 0, moved);
+    setItems(next);
+    setDirty(true);
+    setDragIndex(null);
+  };
+
+  const updateField = (index: number, field: string, value: string) => {
+    setItems(items.map((item, i) => i === index ? { ...item, [field]: value } : item));
+    setDirty(true);
+  };
+
+  const autoResequence = () => {
+    const prefix =
+      entityType === 'students' ? 'STU-' :
+      entityType === 'employees' ? 'EMP-' :
+      entityType === 'fees' ? 'FEE-' :
+      entityType === 'expenses' ? 'EXP-' : 'EQP-';
+    const total = items.length;
+    const next = items.map((item, i) => ({ ...item, autoId: `${prefix}${total - i}` }));
+    setItems(next);
+    setDirty(true);
+  };
+
+  const sortByAutoId = () => {
+    const next = [...items].sort((a, b) => a.autoId?.localeCompare(b.autoId, undefined, { numeric: true }) ?? 0);
+    setItems(next);
+    setDirty(true);
+  };
+
+  const autoRollByClass = () => {
+    const grouped: Record<string, number> = {};
+    const next = items.map(item => {
+      const cls = item.class || '';
+      if (!cls) return { ...item, rollNumber: '' };
+      const seq = (grouped[cls] || 0) + 1;
+      grouped[cls] = seq;
+      return { ...item, rollNumber: String(seq) };
+    });
+    setItems(next);
+    setDirty(true);
+  };
+
+  const saveAll = async () => {
+    if (isReadOnly) return showNotification('Read-only mode: cannot save', 'error');
+
+    const ids = items.map(i => i.autoId);
+    const dupes = ids.filter((id, idx) => ids.indexOf(id) !== idx);
+    if (dupes.length > 0) {
+      showNotification(`Duplicate AUTO IDs: ${[...new Set(dupes)].join(', ')}. Fix before saving.`, 'error');
+      return;
+    }
+
+    setSaving(true);
+    let success = 0;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.firestoreId) continue;
+      try {
+        if (entityType === 'students') {
+          const updates: any = { autoId: item.autoId, sortOrder: i };
+          if (item.class !== item._oldClass) updates.class = item.class;
+          if (item.rollNumber !== item._oldRoll) updates.rollNumber = item.rollNumber;
+          await updateStudent(item.firestoreId, updates);
+          if (item.autoId !== item._oldAutoId) {
+            await updateStudentAutoIdReferences(item._oldAutoId, item.autoId, item.name);
+          }
+        } else {
+          await (entityType === 'employees' ? updateEmployee :
+                 entityType === 'fees' ? updateFee :
+                 entityType === 'expenses' ? updateExpense : updateEquipment)
+            (item.firestoreId, { autoId: item.autoId });
+        }
+        success++;
+      } catch (e) {
+        showNotification(`Failed to update ${item.name}: ${e}`, 'error');
+      }
+    }
+    setSaving(false);
+
+    if (success > 0) {
+      setDirty(false);
+      showNotification(`${success} record(s) updated`, 'success');
+      await loadData();
+    }
+  };
+
+  const allClasses = [...new Set(classes.concat(students.map(s => s.class)).filter(Boolean))].sort();
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+        <div className="flex-1">
+          <label className="text-xs text-cyan-400 font-semibold mb-1 block">Select Entity Type</label>
+          <select value={entityType} onChange={e => setEntityType(e.target.value as CorrectionEntity)}
+            className="w-full sm:w-64 p-3 bg-[#1E1E1E] border border-gray-800 rounded-xl text-white focus:outline-none focus:border-cyan-500">
+            <option value="students">Students</option>
+            <option value="employees">Employees</option>
+            <option value="fees">Fees</option>
+            <option value="expenses">Expenses</option>
+            <option value="equipments">Equipments</option>
+          </select>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={autoResequence}
+            className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20">
+            <FiRefreshCw size={16} />Auto Re-sequence
+          </button>
+          <button onClick={sortByAutoId}
+            className="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-pink-500/20">
+            <FiArrowUp size={16} />Sort by AUTO ID
+          </button>
+          {selectedIds.size > 0 && (
+            <button onClick={assignToSelected}
+              className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-purple-500/20">
+              <FiCheck size={16} />Assign ({selectedIds.size})
+            </button>
+          )}
+          {entityType === 'students' && (
+            <button onClick={autoRollByClass}
+              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-amber-500/20">
+              <FiRefreshCw size={16} />Auto Roll No by Class
+            </button>
+          )}
+          <button onClick={saveAll} disabled={!dirty || saving || isReadOnly}
+            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold shadow-lg transition-all ${
+              dirty && !saving && !isReadOnly
+                ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white shadow-emerald-500/20'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}>
+            <FiCheck size={16} />{saving ? 'Saving...' : 'Save All Changes'}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 text-sm flex-wrap">
+        <span className="text-gray-400">{items.length} record(s)</span>
+        {dirty && <span className="flex items-center gap-1 text-yellow-400"><FiAlertTriangle size={14} />Unsaved changes</span>}
+        {filterable && (
+          <>
+            <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setSelectedIds(new Set()); }}
+              className="p-2 bg-[#1E1E1E] border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500">
+              <option value="">All Classes</option>
+              {allClasses.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="relative flex-1 max-w-xs">
+              <input value={filterText} onChange={e => { setFilterText(e.target.value); setSelectedIds(new Set()); }}
+                placeholder="Search students..."
+                className="w-full p-2 pl-8 bg-[#1E1E1E] border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500 placeholder-gray-500" />
+              <FiSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="bg-[#1E1E1E] border border-gray-800 rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-800/50">
+                {filterable && (
+                  <th className="px-2 py-3 w-10">
+                    <input type="checkbox" checked={displayItems.length > 0 && displayItems.every(i => selectedIds.has(i.firestoreId))}
+                      onChange={toggleSelectAll} className="accent-cyan-500 w-4 h-4 cursor-pointer" />
+                  </th>
+                )}
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 w-16">#</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 w-20">Move</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 w-36">AUTO ID</th>
+                {entityType === 'students' && (
+                  <><th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 w-40">Class</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 w-28">Roll No</th></>
+                )}
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Name / Title</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr><td colSpan={entityType === 'students' ? 7 : 4} className="px-4 py-12 text-center text-gray-500">No records found.</td></tr>
+              ) : displayItems.map((item, i) => (
+                <tr key={item.firestoreId || i}
+                  draggable
+                  onDragStart={() => handleDragStart(items.indexOf(item))}
+                  onDragOver={handleDragOver}
+                  onDrop={() => handleDrop(items.indexOf(item))}
+                  className={`border-t border-gray-800 transition cursor-grab active:cursor-grabbing ${
+                    selectedIds.has(item.firestoreId) ? 'bg-cyan-500/5' : 'hover:bg-gray-800/30'
+                  } ${dragIndex === items.indexOf(item) ? 'opacity-50' : ''}`}>
+                  {filterable && (
+                    <td className="px-2 py-3">
+                      <input type="checkbox" checked={selectedIds.has(item.firestoreId)}
+                        onChange={() => toggleSelect(item.firestoreId)} className="accent-cyan-500 w-4 h-4 cursor-pointer" />
+                    </td>
+                  )}
+                  <td className="px-4 py-3 text-gray-400 font-mono text-sm">{items.indexOf(item) + 1}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      <button onClick={() => moveItem(i, -1)} disabled={i === 0}
+                        className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded disabled:opacity-20 disabled:cursor-not-allowed">
+                        <FiChevronUp size={16} />
+                      </button>
+                      <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1}
+                        className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded disabled:opacity-20 disabled:cursor-not-allowed">
+                        <FiChevronDown size={16} />
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <input value={item.autoId} onChange={e => updateField(i, 'autoId', e.target.value)}
+                      className={`w-full p-2 bg-gray-800 rounded-lg border text-white font-mono text-sm focus:outline-none ${
+                        items.some((x: any, xi: number) => xi !== i && x.autoId === item.autoId && item.autoId !== '')
+                          ? 'border-red-500 text-red-400'
+                          : 'border-gray-700 focus:border-cyan-500'
+                      }`} />
+                  </td>
+                  {entityType === 'students' && (
+                    <>
+                      <td className="px-4 py-3">
+                        <select value={item.class || ''} onChange={e => updateField(i, 'class', e.target.value)}
+                          className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:outline-none focus:border-cyan-500">
+                          <option value="">— Select Class —</option>
+                          {allClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <input value={item.rollNumber} onChange={e => updateField(i, 'rollNumber', e.target.value)}
+                          className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:outline-none focus:border-cyan-500" />
+                      </td>
+                    </>
+                  )}
+                  <td className="px-4 py-3 text-white text-sm">{item.name || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-500">
+        Reorder items using the arrow buttons, then click <strong>Auto Re-sequence</strong> to assign sequential AUTO IDs,
+        or edit any field directly. For students, changing the class or roll number will be reflected across Fees by Student
+        and Fees &amp; Billing after saving. Click <strong>Save All Changes</strong> to persist to the database.
+      </p>
+    </div>
+  );
+};

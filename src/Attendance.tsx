@@ -4,7 +4,6 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Student, Employee, Attendance as Att, Holiday, CausalLeave } from './types';
-import SalarySlip from './components/SalarySlip';
 import type { SalarySlipData } from './salarySlipTypes';
 
 interface AttendanceProps {
@@ -66,7 +65,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   });
   const [clQuotaEdit, setClQuotaEdit] = useState(false);
   const [clQuotaInput, setClQuotaInput] = useState('');
-  const [attendSalarySlip, setAttendSalarySlip] = useState<{ show: boolean; emp: Employee | null; data: SalarySlipData | null }>({ show: false, emp: null, data: null });
 
   // Load causal leaves when view employee changes
   useEffect(() => {
@@ -342,14 +340,20 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
   const exportMonthlySalaryReport = () => {
     const currentMonth = selectedDate.substring(0, 7);
+    const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
     const data = activeEmps.map(e => {
       const si = getEmployeeSalaryInfo(e);
+      const autoCover = Math.min(si.absentDays, quota);
+      const effPresent = si.presentDays + autoCover;
+      const effAbsent = Math.max(0, si.absentDays - autoCover);
+      const effSalary = Math.round(effPresent * si.perDaySalary);
       return {
         'Auto ID': e.autoId, 'Name': e.name, 'Role': e.role, 'Month': currentMonth,
         'Monthly Salary (₹)': si.monthlySalary, 'Working Days': si.workingDays,
-        'Present Days': si.presentDays, 'Absent Days': si.absentDays,
-        'Per Day (₹)': Math.round(si.perDaySalary), 'Earned Salary (₹)': si.netSalary
+        'Present Days': si.presentDays, 'CL Covered': autoCover, 'Effective Present': effPresent,
+        'Absent Days': effAbsent,
+        'Per Day (₹)': Math.round(si.perDaySalary), 'Earned Salary (₹)': effSalary
       };
     });
     const ws = XLSX.utils.json_to_sheet(data);
@@ -711,13 +715,27 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     ]);
     y = y + cardH + padMd + 2;
 
-    // ============ 4. SALARY SUMMARY CARD ============
-    const sumRowsArr: [string, string][] = [
+    // ============ 4. SALARY DETAILS CARD (two columns) ============
+    const earnItems: [string, string][] = [
       ['Basic Salary', money(bd.grossSalary)],
+      ['House Rent Allowance', 'Rs 0'],
+      ['Travelling Allowance', 'Rs 0'],
+      ['Medical Allowance', 'Rs 0'],
+      ['Conveyance Allowance', 'Rs 0'],
     ];
-    if (salaryData && salaryData.salary.allowances > 0) sumRowsArr.push(['Allowances', money(salaryData.salary.allowances)]);
-    if (salaryData && salaryData.salary.deductions > 0) sumRowsArr.push(['Deductions', money(salaryData.salary.deductions)]);
-    const sumH = tBarH + 7 + sumRowsArr.length * 8.5 + padSm + 2 + 1 + padSm + 6;
+    const deductItems: [string, string][] = [
+      ['EPF(%)', 'Rs 0'],
+      ['PF(%)', 'Rs 0'],
+      ['TDS', 'Rs 0'],
+      ['Others(-)', 'Rs 0'],
+      ['PTAX', 'Rs 0'],
+    ];
+    const itemCount = Math.max(earnItems.length, deductItems.length);
+    // Summary table height (centered box below items)
+    const sumTableW = CW * 0.72;
+    const sumTableX = ML + (CW - sumTableW) / 2;
+    const sumContH = padSm + 8.5 + 8.5 + padSm + 1 + padSm + 10 + padSm;
+    const sumH = tBarH + 7 + (1 + itemCount) * 8.5 + padSm + sumContH;
 
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
     doc.roundedRect(ML, y, CW, sumH, 3, 3, 'S');
@@ -726,24 +744,64 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.1);
     doc.line(ML, y + tBarH, MR, y + tBarH);
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
-    doc.text('SALARY SUMMARY', ML + padLg, y + 7.5);
+    doc.text('SALARY DETAILS', ML + padLg, y + 7.5);
+
+    const colW = (CW - padLg * 3) / 2;
+    const earnX = ML + padLg;
+    const deductX = earnX + colW + padLg;
 
     let sy = y + tBarH + 7;
-    sumRowsArr.forEach(([lbl, val]) => {
-      doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
-      doc.text(lbl, ML + padLg, sy);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
-      doc.text(val, MR - padLg, sy, { align: 'right' });
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sTextSec);
+    doc.text('EARNINGS', earnX, sy);
+    doc.text('DEDUCTIONS', deductX, sy);
+    sy += 8.5;
+
+    for (let i = 0; i < itemCount; i++) {
+      if (i < earnItems.length) {
+        doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+        doc.text(earnItems[i][0], earnX, sy);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+        doc.text(earnItems[i][1], earnX + colW - padLg * 2, sy, { align: 'right' });
+      }
+      if (i < deductItems.length) {
+        doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+        doc.text(deductItems[i][0], deductX, sy);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+        doc.text(deductItems[i][1], deductX + colW - padLg * 2, sy, { align: 'right' });
+      }
       sy += 8.5;
-    });
+    }
+
     sy += padSm;
+
+    // ═══════ Summary table (centered) ═══════
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
-    doc.line(ML + padLg, sy, MR - padLg, sy);
-    sy += padSm + 1;
+    doc.roundedRect(sumTableX, sy, sumTableW, sumContH, 3, 3, 'S');
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(sumTableX, sy, sumTableW, sumContH, 3, 3, 'F');
+
+    let ss = sy + padSm + 7;
+    const valX = sumTableX + sumTableW - padLg;
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+    doc.text('Gross Earnings (A)', sumTableX + padLg, ss);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+    doc.text(money(bd.grossSalary), valX, ss, { align: 'right' });
+    ss += 8.5;
+
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+    doc.text('Gross Deductions (B)', sumTableX + padLg, ss);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
+    doc.text('Rs 0', valX, ss, { align: 'right' });
+    ss += padSm;
+
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
+    doc.line(sumTableX + padLg, ss, sumTableX + sumTableW - padLg, ss);
+    ss += padSm;
+
     doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
-    doc.text('Net Salary (Earned)', ML + padLg, sy);
-    doc.setFontSize(15); doc.setTextColor(...sPrimaryDark);
-    doc.text(money(bd.earnedSalary), MR - padLg, sy, { align: 'right' });
+    doc.text('Net Pay (A-B)', sumTableX + padLg, ss + 7);
+    doc.setFontSize(13); doc.setTextColor(...sPrimaryDark);
+    doc.text(money(bd.earnedSalary), valX, ss + 7, { align: 'right' });
 
     // ============ 5. FOOTER ============
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -822,14 +880,15 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     return { presentDays, absentDays, workingDays, monthlySalary, perDaySalary, earnedSalary, deductions, netSalary };
   };
 
-  const getSalarySlipDataForAttend = (emp: Employee, clCount: number = 0): SalarySlipData => {
+  const getSalarySlipDataForAttend = (emp: Employee, _clCount: number = 0): SalarySlipData => {
     const currentMonth = selectedDate.substring(0, 7);
     const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const info = getEmployeeSalaryInfo(emp);
     const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-    const effectivePresent = info.presentDays + clCount;
-    const effectiveAbsent = Math.max(0, info.absentDays - clCount);
-    const perDaySalary = Math.round(info.perDaySalary);
+    const autoCover = Math.min(info.absentDays, quota);
+    const effectivePresent = info.presentDays + autoCover;
+    const effectiveAbsent = Math.max(0, info.absentDays - autoCover);
+    const perDaySalary = info.perDaySalary;
     const earnedSalary = Math.round(effectivePresent * perDaySalary);
     const deductions = Math.round(effectiveAbsent * perDaySalary);
     return {
@@ -852,9 +911,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       attendance: {
         workingDays: info.workingDays,
         presentDays: info.presentDays,
-        absentDays: info.absentDays,
-        casualLeavesUsed: clCount,
-        casualLeavesRemaining: Math.max(0, quota - clCount),
+        absentDays: effectiveAbsent,
+        casualLeavesUsed: autoCover,
+        casualLeavesRemaining: Math.max(0, quota - autoCover),
       },
       salary: {
         monthlyGross: info.monthlySalary,
@@ -865,18 +924,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       },
       payPeriod: monthName,
     };
-  };
-
-  const openAttendSalarySlip = async (emp: Employee) => {
-    let clCount = 0;
-    if (getCausalLeaves) {
-      try {
-        const cl = await getCausalLeaves(emp.autoId);
-        const currentMonth = selectedDate.substring(0, 7);
-        clCount = Array.isArray(cl) ? cl.filter((c: any) => c.date?.startsWith(currentMonth)).length : 0;
-      } catch {}
-    }
-    setAttendSalarySlip({ show: true, emp, data: getSalarySlipDataForAttend(emp, clCount) });
   };
 
   // ===== Number to Words (Indian Rupee format) =====
@@ -1142,39 +1189,37 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Absent</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Work Days</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Per Day</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">CL Left</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Earned Salary</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Slip</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">PDF</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredEmployees.map(e => {
                         const info = getEmployeeSalaryInfo(e);
+                        const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
+                        const autoCover = Math.min(info.absentDays, quota);
+                        const effAbsent = Math.max(0, info.absentDays - autoCover);
+                        const effSalary = Math.round((info.presentDays + autoCover) * info.perDaySalary);
+                        const clLeft = Math.max(0, quota - autoCover);
                         return (
                           <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>
-                            <td className="px-4 py-3"><span className="text-emerald-400 font-semibold">{info.presentDays}</span></td>
-                            <td className="px-4 py-3"><span className="text-red-400 font-semibold">{info.absentDays}</span></td>
+                            <td className="px-4 py-3"><span className="text-emerald-400 font-semibold">{info.presentDays}</span>{autoCover > 0 && <span className="text-cyan-400 text-xs ml-1">+{autoCover}</span>}</td>
+                            <td className="px-4 py-3"><span className="text-red-400 font-semibold">{effAbsent}</span></td>
                             <td className="px-4 py-3 text-gray-400 hidden md:table-cell">{info.workingDays}</td>
                             <td className="px-4 py-3 text-gray-400 hidden lg:table-cell">₹{info.perDaySalary.toFixed(0)}</td>
-                            <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{info.netSalary.toLocaleString()}</span></td>
+                            <td className="px-4 py-3"><span className="text-cyan-400 font-semibold">{clLeft}</span></td>
+                            <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
                             <td className="px-4 py-3">
-                               <div className="flex gap-1">
-                                <button
-                                  onClick={() => openAttendSalarySlip(e)}
-                                  title={`View salary slip for ${e.name}`}
-                                  className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white text-xs font-semibold rounded-lg shadow transition"
-                                >
-                                  <FiEye size={13} /> View
-                                </button>
-                               <button
-                                 onClick={() => exportSalarySlips(e)}
-                                 title={`Download salary slip for ${e.name}`}
-                                 className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white text-xs font-semibold rounded-lg shadow transition"
-                               >
-                                 <FiDownload size={13} /> PDF
-                               </button>
-                               </div>
-                             </td>
+                              <button
+                                onClick={() => exportSalarySlips(e)}
+                                title={`Download salary slip for ${e.name}`}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white text-xs font-semibold rounded-lg shadow transition"
+                              >
+                                <FiDownload size={13} /> PDF
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1447,17 +1492,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         </div>
       )}
 
-      {attendSalarySlip.show && attendSalarySlip.data && (
-        <div className="fixed inset-0 bg-black/80 flex items-start justify-center z-50 p-4 overflow-y-auto">
-          <div className="relative w-full max-w-3xl my-8">
-            <div className="absolute -top-3 right-0 z-10 flex gap-2">
-              <button onClick={() => exportSalarySlips(attendSalarySlip.emp!, attendSalarySlip.data!)} className="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-2 shadow-lg transition flex items-center gap-1.5 text-xs font-semibold" aria-label="Download PDF"><FiDownload size={16} /><span className="pr-1">PDF</span></button>
-              <button onClick={() => setAttendSalarySlip({ show: false, emp: null, data: null })} className="bg-gray-800 hover:bg-gray-700 text-white rounded-full p-2 shadow-lg transition" aria-label="Close salary slip"><FiX size={20} /></button>
-            </div>
-            <SalarySlip data={attendSalarySlip.data} />
-          </div>
-        </div>
-      )}
     </div>
   );
 };

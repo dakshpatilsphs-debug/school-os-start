@@ -33,12 +33,14 @@ const cleanData = (obj: any): any => {
   return cleaned;
 };
 
-// Generate Auto ID (year-based prefix format, e.g. A26xxx for 2026)
+// Generate Auto ID (prefix + timestamp + random for guaranteed uniqueness)
+let _autoIdSeq = 0;
 export const generateAutoId = (prefix: string = 'A'): string => {
-  const year = new Date().getFullYear();
-  const base = year - 2000; // 26 for 2026
-  const random = Math.floor(Math.random() * 900) + 100;
-  return `${prefix}${base}${random}`;
+  _autoIdSeq = (_autoIdSeq + 1) % 10000;
+  const ts = Date.now().toString(36).slice(-4);
+  const seq = String(_autoIdSeq).padStart(4, '0');
+  const rand = Math.floor(Math.random() * 9000) + 1000;
+  return `${prefix}${ts}${seq}${rand}`;
 };
 
 // Upload Image to Firebase Storage
@@ -313,10 +315,16 @@ export const deleteTimetableEntry = async (id: string) =>
   deleteDoc(doc(db, 'timetable', id));
 
 // ===== Sequential ID Generator =====
-// Counts existing records and returns next sequential number (e.g., 1, 2, 3...)
+// Parses existing autoId values and returns the next available number.
 export const getNextSequentialId = async (collectionName: string): Promise<number> => {
   const snapshot = await getDocs(collection(db, collectionName));
-  return snapshot.size + 1;
+  const maxNum = snapshot.docs.reduce((max, doc) => {
+    const id = String((doc.data() as any)?.autoId || '');
+    const match = id.match(/(\d+)$/);
+    const num = match ? parseInt(match[1], 10) : 0;
+    return num > max ? num : max;
+  }, 0);
+  return maxNum + 1;
 };
 // ===== Equipment Functions =====
 export const addEquipment = async (equipment: any) =>
