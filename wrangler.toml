@@ -1,4 +1,0 @@
-# Cloudflare Pages deployment config
-# Deploy: npx wrangler pages deploy dist --branch main
-
-compatibility_date = "2025-04-01"

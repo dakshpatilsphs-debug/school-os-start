@@ -3095,7 +3095,7 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'ai' && (
-          <div className="h-[calc(100vh-200px)]">
+          <div className="h-[calc(100vh-180px)] -mx-8">
             <AIAssistant variant="page" />
           </div>
         )}
