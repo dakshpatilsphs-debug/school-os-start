@@ -50,6 +50,16 @@ const App: React.FC = () => {
   const [modalType, setModalType] = useState<'add' | 'edit'>('add');
   const [currentRecord, setCurrentRecord] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => {
+    const now = new Date();
+    return [`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`];
+  });
+  const [showFinMonthPicker, setShowFinMonthPicker] = useState(false);
+  const [finSelectedMonths, setFinSelectedMonths] = useState<string[]>(() => {
+    const now = new Date();
+    return [`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`];
+  });
   const [studentClassFilter, setStudentClassFilter] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [firebaseErrorLog, setFirebaseErrorLog] = useState<{ time: string; code: string; message: string; context: string }[]>([]);
@@ -1488,6 +1498,530 @@ const App: React.FC = () => {
     }
   };
 
+  const exportEmployeeReportPDF = () => {
+    const months = selectedMonths;
+    if (months.length === 0) { showNotification('Please select at least one month', 'error'); return; }
+    const activeEmps = employees.filter(e => e.status === 'ACTIVE');
+    if (activeEmps.length === 0) { showNotification('No active employees', 'error'); return; }
+
+    const hList = holidays || [];
+    const doc = new jsPDF();
+    const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
+    const sBorder = [226, 232, 240] as const;
+    const sText = [30, 41, 59] as const;
+    const sTextSec = [100, 116, 139] as const;
+    const sTextMuted = [148, 163, 184] as const;
+    const sPrimary = [14, 165, 233] as const;
+    const sPrimaryDark = [2, 132, 199] as const;
+    const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
+
+    let grandTotal = 0;
+    const empMonthRows: { name: string; role: string; month: string; workingDays: number; presentDays: number; autoCover: number; clLeft: number; earnedSalary: number }[] = [];
+    let y = 12;
+    const cX = (pct: number) => ML + 2 + CW * pct / 100;
+
+    const buildAttendance = (emp: Employee, month: string) => {
+      const [yr, mo] = month.split('-').map(Number);
+      const daysInMonth = new Date(yr, mo, 0).getDate();
+      const empAttendance = attendance.filter(a => a.personId === emp.autoId && a.date.startsWith(month));
+      const presentDays = empAttendance.filter(a => a.status === 'present').length;
+      const absentDays = empAttendance.filter(a => a.status === 'absent').length;
+      const monthlySalary = emp.salary || 0;
+      let workingDays = 0;
+      for (let day = 1; day <= daysInMonth; day++) {
+        const ds = `${month}-${String(day).padStart(2, '0')}`;
+        const d = new Date(ds + 'T12:00:00');
+        if (d.getDay() === 0) continue;
+        if (hList.some(h => h && h.date === ds && h.type === 'manual')) continue;
+        workingDays++;
+      }
+      const perDaySalary = monthlySalary / (workingDays || 1);
+      const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
+      const autoCover = Math.min(absentDays, quota);
+      const effPresent = presentDays + autoCover;
+      const effAbsent = Math.max(0, absentDays - autoCover);
+      const earnedSalary = Math.round(effPresent * perDaySalary);
+      const clLeft = Math.max(0, quota - autoCover);
+
+      // Build daily grid only for visual (mark only days with actual attendance records)
+      const daily: { day: number; status: string }[] = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        const ds = `${month}-${String(day).padStart(2, '0')}`;
+        const d = new Date(ds + 'T12:00:00');
+        const isSun = d.getDay() === 0;
+        const isHol = hList.some(h => h && h.date === ds && h.type === 'manual');
+        const att = attendance.find(a => a.personId === emp.autoId && a.date === ds);
+        const status = att ? att.status : (isSun ? 'weekend' : isHol ? 'holiday' : 'absent');
+        daily.push({ day, status });
+      }
+
+      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary, earnedSalary, autoCover, clLeft, effAbsent, daysInMonth };
+    };
+
+    const drawPageHeader = () => {
+      let logoOffset = 0;
+      const logoUrl = schoolSettings?.schoolLogo;
+      if (logoUrl) { try { doc.addImage(logoUrl, 'PNG', ML, y, 10, 10); logoOffset = 12; } catch (e) {} }
+      const schoolName = (schoolSettings?.schoolName || 'School OS').toUpperCase();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...sPrimaryDark);
+      doc.text(schoolName, ML + logoOffset, y + 4);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      const addr = [schoolSettings?.address || '', schoolSettings?.phone || '', schoolSettings?.email || ''].filter(Boolean).join(' | ');
+      if (addr) doc.text(addr, ML + logoOffset, y + 8);
+      doc.setDrawColor(...sPrimary); doc.setLineWidth(0.3); doc.line(ML, y + 12, MR, y + 12);
+      y += 14;
+    };
+
+    const needPage = (needed: number) => {
+      if (y + needed > 275) { doc.addPage(); y = 12; drawPageHeader(); }
+    };
+
+    // ── First page header ──
+    drawPageHeader();
+
+    // ── Per-month tables ──
+    const colName = ML + 2;
+    const colPD = cX(28);
+    const colAD = cX(36);
+    const colCLU = cX(44);
+    const clCLL = cX(52);
+    const colWD = cX(60);
+
+    months.forEach((month) => {
+      const monthName = new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const monthEmps = activeEmps.map(emp => {
+        const att = buildAttendance(emp, month);
+        grandTotal += att.earnedSalary;
+        empMonthRows.push({ name: emp.name, role: emp.role || '-', month, workingDays: att.workingDays, presentDays: att.presentDays, autoCover: att.autoCover, clLeft: att.clLeft, earnedSalary: att.earnedSalary });
+        return { name: emp.name, ...att };
+      });
+      const monthTotal = monthEmps.reduce((s, e) => s + e.earnedSalary, 0);
+      const rowH = 6.5;
+      const monthBlockH = 10 + 9 + monthEmps.length * rowH + 7 + 7;
+
+      needPage(monthBlockH);
+
+      // Month header
+      doc.setFillColor(248, 250, 252); doc.setDrawColor(...sPrimary); doc.setLineWidth(0.12);
+      doc.rect(ML, y, CW, 9, 'FD');
+      doc.setFillColor(...sPrimary); doc.rect(ML, y, 2, 9, 'F');
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
+      doc.text(monthName, ML + 5, y + 6.5);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text('Employees: ' + monthEmps.length, MR - 1, y + 6.5, { align: 'right' });
+      y += 11;
+
+      // Column headers
+      doc.setFillColor(240, 249, 255); doc.rect(ML, y, CW, 7, 'F');
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
+      doc.rect(ML, y, CW, 7, 'S');
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
+      doc.text('Name', colName, y + 5);
+      doc.text('Present', colPD, y + 5);
+      doc.text('Absent', colAD, y + 5);
+      doc.text('CL.Used', colCLU, y + 5);
+      doc.text('CL.Left', clCLL, y + 5);
+      doc.text('Work.Dys', colWD, y + 5);
+      doc.text('Earned', MR - 2, y + 5, { align: 'right' });
+      y += 8;
+
+      // Employee rows
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+      monthEmps.forEach((e, ei) => {
+        needPage(rowH + 2);
+        if (ei % 2 === 0) { doc.setFillColor(252, 252, 252); doc.rect(ML, y, CW, rowH, 'F'); }
+        doc.setTextColor(...sText);
+        doc.text(e.name, colName, y + 4.5);
+        doc.setTextColor(...sTextSec);
+        doc.text(String(e.presentDays), colPD, y + 4.5);
+        const adClr = e.absentDays > e.autoCover ? [220, 38, 38] as const : sTextSec;
+        doc.setTextColor(...adClr);
+        doc.text(String(e.absentDays), colAD, y + 4.5);
+        doc.setTextColor(6, 182, 212);
+        doc.text(String(e.autoCover), colCLU, y + 4.5);
+        doc.setTextColor(...sTextSec);
+        doc.text(String(e.clLeft), clCLL, y + 4.5);
+        doc.text(String(e.workingDays), colWD, y + 4.5);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
+        doc.text(money(e.earnedSalary), MR - 2, y + 4.5, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setDrawColor(...sBorder); doc.setLineWidth(0.03);
+        doc.line(ML, y + rowH, MR, y + rowH);
+        y += rowH;
+      });
+
+      // Month subtotal
+      needPage(7);
+      doc.setDrawColor(...sPrimary); doc.setLineWidth(0.08);
+      doc.line(ML, y, MR, y);
+      y += 1;
+      doc.setFillColor(248, 250, 252); doc.rect(ML, y, CW, 6, 'F');
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
+      doc.text('Total for ' + monthName, colName, y + 4);
+      doc.setFontSize(10); doc.setTextColor(...sPrimaryDark);
+      doc.text(money(monthTotal), MR - 2, y + 4, { align: 'right' });
+      y += 8;
+    });
+
+    // ── Employee Summary Table ──
+    if (empMonthRows.length > 0) {
+      const rowH = 7;
+      const tableH = 12 + empMonthRows.length * rowH + 3;
+      needPage(tableH);
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.1);
+      doc.roundedRect(ML, y, CW, tableH, 1, 1, 'S');
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(ML, y, CW, 10, 1, 1, 'F');
+      doc.line(ML, y + 10, MR, y + 10);
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
+      doc.text('EMPLOYEE SUMMARY', ML + 2, y + 7);
+      y += 13;
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sTextSec);
+      doc.text('Name', colName, y);
+      doc.text('Month', cX(24), y);
+      doc.text('WD', cX(38), y);
+      doc.text('PD', cX(46), y);
+      doc.text('CL.U', cX(54), y);
+      doc.text('CL.L', cX(62), y);
+      doc.text('Earned', MR - 2, y, { align: 'right' });
+      y += 1;
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
+      doc.line(ML, y, MR, y);
+      y += 3;
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+      empMonthRows.forEach((r) => {
+        const mn = new Date(r.month + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        needPage(rowH + 2);
+        doc.setTextColor(...sText);
+        doc.text(r.name, colName, y + 4.5);
+        doc.setTextColor(...sTextSec);
+        doc.text(mn, cX(24), y + 4.5);
+        doc.text(String(r.workingDays), cX(38), y + 4.5);
+        doc.text(String(r.presentDays), cX(46), y + 4.5);
+        doc.text(String(r.autoCover), cX(54), y + 4.5);
+        doc.text(String(r.clLeft), cX(62), y + 4.5);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
+        doc.text(money(r.earnedSalary), MR - 2, y + 4.5, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        y += rowH;
+      });
+      y += 2;
+    }
+
+    // ── Month-wise Distribution ──
+    if (months.length > 0) {
+      const monthDist = months.map(m => {
+        const rows = empMonthRows.filter(r => r.month === m);
+        const total = rows.reduce((s, r) => s + r.earnedSalary, 0);
+        const mn = new Date(m + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        return { label: mn, employees: rows.length, total };
+      });
+      const distH = 14 + monthDist.length * 8 + 4;
+      needPage(distH);
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.1);
+      doc.roundedRect(ML, y, CW, distH, 1, 1, 'S');
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(ML, y, CW, 11, 1, 1, 'F');
+      doc.line(ML, y + 11, MR, y + 11);
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
+      doc.text('MONTH-WISE DISTRIBUTION', ML + 2, y + 7.5);
+      y += 14;
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sTextSec);
+      doc.text('Month', ML + 2, y);
+      doc.text('Employees', cX(30), y);
+      doc.text('Total Paid', MR - 2, y, { align: 'right' });
+      y += 1;
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
+      doc.line(ML, y, MR, y);
+      y += 3.5;
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+      monthDist.forEach((d) => {
+        needPage(10);
+        doc.setTextColor(...sText);
+        doc.text(d.label, ML + 2, y + 4.5);
+        doc.setTextColor(...sTextSec);
+        doc.text(String(d.employees), cX(30), y + 4.5);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
+        doc.text(money(d.total), MR - 2, y + 4.5, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        y += 8;
+      });
+      y += 3;
+    }
+
+    // ── Grand Total ──
+    if (activeEmps.length > 0 && months.length > 0) {
+      needPage(28);
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.3);
+      doc.line(ML, y, MR, y);
+      y += 6;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...sPrimary);
+      doc.text('GRAND TOTAL', pw / 2, y + 3, { align: 'center' });
+      y += 9;
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text('Employees: ' + activeEmps.length + ' | Months: ' + months.length, ML, y + 3);
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
+      doc.text('Rs ' + grandTotal.toLocaleString('en-IN'), MR, y + 3, { align: 'right' });
+      y += 9;
+      doc.setFontSize(7); doc.setFont('helvetica', 'italic'); doc.setTextColor(...sTextMuted);
+      doc.text('Rupees ' + numberToWords(grandTotal) + ' Only', pw / 2, y + 2, { align: 'center' });
+    }
+
+    // ── Footer ──
+    if (y < 275) {
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.08);
+      doc.line(ML, 277, MR, 277);
+      doc.setFontSize(6); doc.setTextColor(...sTextMuted); doc.setFont('helvetica', 'normal');
+      doc.text('Computer-generated report.', pw / 2, 281, { align: 'center' });
+    }
+
+    doc.save('Employees_Report_' + months.join('_') + '.pdf');
+    showNotification('Employee report PDF exported successfully', 'success');
+  };
+
+  const exportFinancialReportPDF = () => {
+    const activeStudents = students.filter(s => s.status === 'ACTIVE');
+    if (activeStudents.length === 0) { showNotification('No active students', 'error'); return; }
+
+    const doc = new jsPDF();
+    const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
+    const sBorder = [226, 232, 240] as const;
+    const sText = [30, 41, 59] as const;
+    const sTextSec = [100, 116, 139] as const;
+    const sTextMuted = [148, 163, 184] as const;
+    const sPrimary = [14, 165, 233] as const;
+    const sPrimaryDark = [2, 132, 199] as const;
+    const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
+    const cX = (pct: number) => ML + 2 + CW * pct / 100;
+    const getMonthFromDate = (d: string) => { if (!d) return ''; const dt = new Date(d); return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); };
+    const isSalary = (cat: string) => cat?.toLowerCase().includes('salary');
+    let y = 12;
+
+    const drawPageHeader = (title: string) => {
+      let logoOffset = 0;
+      const logoUrl = schoolSettings?.schoolLogo;
+      if (logoUrl) { try { doc.addImage(logoUrl, 'PNG', ML, y, 10, 10); logoOffset = 12; } catch (e) {} }
+      const schoolName = (schoolSettings?.schoolName || 'School OS').toUpperCase();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...sPrimaryDark);
+      doc.text(schoolName, ML + logoOffset, y + 4);
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text(title, ML + logoOffset, y + 8);
+      const addr = [schoolSettings?.address || '', schoolSettings?.phone || '', schoolSettings?.email || ''].filter(Boolean).join(' | ');
+      if (addr) doc.text(addr, ML + logoOffset, y + 12);
+      doc.setDrawColor(...sPrimary); doc.setLineWidth(0.3); doc.line(ML, y + 14, MR, y + 14);
+      y += 17;
+    };
+
+    const needPage = (needed: number) => {
+      if (y + needed > 275) { doc.addPage(); y = 12; drawPageHeader('Financial Report'); }
+    };
+
+    drawPageHeader('Financial Report');
+
+    // ── All paid fees (up to date) ──
+    const paidFees = fees.filter(f => f.status === 'paid');
+    const allExpenses = expenses.filter(e => e.date);
+    const totalIncome = paidFees.reduce((s, f) => s + (f.amount || 0), 0);
+    const totalExp = allExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+
+    // ── Section 1: Fees Collected by Student ──
+    needPage(12);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...sPrimary);
+    doc.text('FEES COLLECTED BY STUDENT', ML + 2, y + 3);
+    y += 9;
+
+    const paidStudents = activeStudents.filter(s => paidFees.some(f => f.studentId === s.autoId));
+    const allClasses = [...new Set(paidStudents.filter(s => s.class).map(s => s.class))].sort();
+    const rowH = 6.5;
+
+    allClasses.forEach((cls) => {
+      const clsStudents = paidStudents.filter(s => s.class === cls);
+      const clsPaidFees = paidFees.filter(f => clsStudents.some(s => s.autoId === f.studentId));
+      const clsTotal = clsPaidFees.reduce((s, f) => s + (f.amount || 0), 0);
+      const blockH = 10 + 9 + clsStudents.length * rowH + 7 + 7;
+
+      needPage(blockH);
+
+      // Class header
+      doc.setFillColor(248, 250, 252); doc.setDrawColor(...sPrimary); doc.setLineWidth(0.12);
+      doc.rect(ML, y, CW, 9, 'FD');
+      doc.setFillColor(...sPrimary); doc.rect(ML, y, 2, 9, 'F');
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
+      doc.text('Class ' + cls, ML + 5, y + 6.5);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text('Paid: ' + clsStudents.length + '/' + activeStudents.filter(s => s.class === cls).length, MR - 1, y + 6.5, { align: 'right' });
+      y += 11;
+
+      // Column headers
+      doc.setFillColor(240, 249, 255); doc.rect(ML, y, CW, 7, 'F');
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
+      doc.rect(ML, y, CW, 7, 'S');
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
+      doc.text('Name', ML + 2, y + 5);
+      doc.text('ID', cX(28), y + 5);
+      doc.text('Package', cX(48), y + 5);
+      doc.text('Amount Paid', MR - 2, y + 5, { align: 'right' });
+      y += 8;
+
+      // Student rows
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+      clsStudents.forEach((st, si) => {
+        needPage(rowH + 2);
+        const stPaid = clsPaidFees.filter(f => f.studentId === st.autoId).reduce((s, f) => s + (f.amount || 0), 0);
+        if (si % 2 === 0) { doc.setFillColor(252, 252, 252); doc.rect(ML, y, CW, rowH, 'F'); }
+        doc.setTextColor(...sText);
+        doc.text(st.name, ML + 2, y + 4.5);
+        doc.setTextColor(...sTextSec);
+        doc.text(st.autoId, cX(28), y + 4.5);
+        doc.text(money(st.feeAmount || 0), cX(48), y + 4.5);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(22, 163, 74);
+        doc.text(money(stPaid), MR - 2, y + 4.5, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setDrawColor(...sBorder); doc.setLineWidth(0.03);
+        doc.line(ML, y + rowH, MR, y + rowH);
+        y += rowH;
+      });
+
+      // Class subtotal
+      needPage(7);
+      doc.setDrawColor(...sPrimary); doc.setLineWidth(0.08);
+      doc.line(ML, y, MR, y);
+      y += 1;
+      doc.setFillColor(248, 250, 252); doc.rect(ML, y, CW, 6, 'F');
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
+      doc.text('Collected for Class ' + cls, ML + 2, y + 4);
+      doc.setFontSize(9); doc.setTextColor(...sPrimaryDark);
+      doc.text(money(clsTotal), MR - 2, y + 4, { align: 'right' });
+      y += 8;
+    });
+
+    // ── Section 2: All Expenses (new page) ──
+    if (allExpenses.length > 0) {
+      doc.addPage(); y = 12; drawPageHeader('Financial Report');
+
+      // ── Red theme for expense section ──
+      const expRed = [220, 38, 38] as const;
+      const expRedLight = [254, 242, 242] as const;
+      const expRedBg = [248, 250, 252] as const;
+
+      const expRowH = 6;
+      const expBlockH = 10 + 9 + allExpenses.length * expRowH + 7 + 7;
+      needPage(expBlockH);
+
+      doc.setFillColor(expRedLight[0], expRedLight[1], expRedLight[2]); doc.setDrawColor(...expRed); doc.setLineWidth(0.12);
+      doc.rect(ML, y, CW, 9, 'FD');
+      doc.setFillColor(...expRed); doc.rect(ML, y, 2, 9, 'F');
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...expRed);
+      doc.text('EXPENSES', ML + 5, y + 6.5);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text('Total: ' + allExpenses.length, MR - 1, y + 6.5, { align: 'right' });
+      y += 11;
+
+      doc.setFillColor(255, 247, 237); doc.rect(ML, y, CW, 7, 'F');
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
+      doc.rect(ML, y, CW, 7, 'S');
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...expRed);
+      doc.text('Date', ML + 2, y + 5);
+      doc.text('Category', cX(15), y + 5);
+      doc.text('Description', cX(32), y + 5);
+      doc.text('Paid To', cX(55), y + 5);
+      doc.text('Amount', MR - 2, y + 5, { align: 'right' });
+      y += 8;
+
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+      allExpenses.forEach((e, ei) => {
+        needPage(expRowH + 2);
+        if (ei % 2 === 0) { doc.setFillColor(255, 247, 237); doc.rect(ML, y, CW, expRowH, 'F'); }
+        doc.setTextColor(...sText);
+        doc.text(e.date || '-', ML + 2, y + 4);
+        doc.setTextColor(...sTextSec);
+        const catLabel = isSalary(e.category) ? (e.category + ' - ' + getMonthFromDate(e.date)) : (e.category || '-');
+        doc.text(catLabel, cX(15), y + 4);
+        doc.text(e.description || '-', cX(32), y + 4);
+        doc.text(e.paidTo || '-', cX(55), y + 4);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...expRed);
+        doc.text(money(e.amount || 0), MR - 2, y + 4, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setDrawColor(...sBorder); doc.setLineWidth(0.03);
+        doc.line(ML, y + expRowH, MR, y + expRowH);
+        y += expRowH;
+      });
+
+      needPage(7);
+      doc.setDrawColor(...expRed); doc.setLineWidth(0.08);
+      doc.line(ML, y, MR, y);
+      y += 1;
+      doc.setFillColor(255, 247, 237); doc.rect(ML, y, CW, 6, 'F');
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
+      doc.text('Total Expenses', ML + 2, y + 4);
+      doc.setFontSize(9); doc.setTextColor(...expRed);
+      doc.text(money(totalExp), MR - 2, y + 4, { align: 'right' });
+      y += 8;
+    }
+
+    // ── Section 3: Income vs Expenses ──
+    needPage(45);
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.3);
+    doc.line(ML, y, MR, y);
+    y += 6;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...sPrimary);
+    doc.text('INCOME vs EXPENSES', pw / 2, y + 3, { align: 'center' });
+    y += 11;
+
+    const vsData = [
+      { label: 'Total Income (Paid Fees)', value: totalIncome, clr: [22, 163, 74] as [number, number, number] },
+      { label: 'Total Expenses', value: totalExp, clr: [220, 38, 38] as [number, number, number] },
+      { label: 'Net Balance', value: totalIncome - totalExp, clr: (totalIncome - totalExp) >= 0 ? [22, 163, 74] as [number, number, number] : [220, 38, 38] as [number, number, number] },
+    ];
+    vsData.forEach((d) => {
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text(d.label, ML + 10, y + 4);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...d.clr);
+      doc.text(money(d.value), MR - 10, y + 4, { align: 'right' });
+      y += 10;
+    });
+
+    // ── Section 4: Overall Overview ──
+    y += 2;
+    needPage(50);
+    doc.setDrawColor(...sBorder); doc.setLineWidth(0.3);
+    doc.line(ML, y, MR, y);
+    y += 6;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...sPrimary);
+    doc.text('OVERALL OVERVIEW', pw / 2, y + 3, { align: 'center' });
+    y += 11;
+
+    const overview = [
+      ['Total Students (Active)', String(activeStudents.length)],
+      ['Students Paid', String(paidStudents.length)],
+      ['Payment Rate', activeStudents.length > 0 ? (paidStudents.length / activeStudents.length * 100).toFixed(1) + '%' : '0%'],
+      ['Total Classes', String(allClasses.length)],
+      ['Total Income (Fees)', money(totalIncome)],
+      ['Total Expenses', money(totalExp)],
+      ['Net Financial Position', money(totalIncome - totalExp)],
+    ];
+    overview.forEach(([lbl, val], i) => {
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
+      doc.text(lbl, ML + 10, y + 4);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...sPrimaryDark);
+      doc.text(val, MR - 10, y + 4, { align: 'right' });
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.04);
+      doc.line(ML + 5, y + 6, MR - 5, y + 6);
+      y += 8;
+    });
+
+    // ── Footer ──
+    if (y < 275) {
+      doc.setDrawColor(...sBorder); doc.setLineWidth(0.08);
+      doc.line(ML, 277, MR, 277);
+      doc.setFontSize(6); doc.setTextColor(...sTextMuted); doc.setFont('helvetica', 'normal');
+      doc.text('Computer-generated report.', pw / 2, 281, { align: 'center' });
+    }
+
+    doc.save('Financial_Report.pdf');
+    showNotification('Financial report PDF exported successfully', 'success');
+  };
+
   const resetEquipmentForm = () => {
     setEquipmentStudentClassFilter('');
     setEquipmentEmployeeRoleFilter('');
@@ -2703,9 +3237,9 @@ const App: React.FC = () => {
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Monthly Salary</p><p className="text-2xl font-bold text-yellow-400">₹{getEligibleSalaryEmployees().reduce((s, e) => s + (e.salary || 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Paid</p><p className="text-2xl font-bold text-red-400">₹{employees.reduce((s, e) => s + getEmployeeExpenseInfo(e).totalPaid, 0).toLocaleString()}</p></div>
             </div>
-            <div className="flex flex-col lg:flex-row gap-4 items-center">
-              <div className="flex-1 relative w-full"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, or role..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}<button onClick={() => exportToExcel(employees, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportToPDF(employees, 'Employees Report')} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
+            <div className="flex flex-col gap-3">
+              <div className="relative w-full"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, or role..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
+              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(employees, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -3084,12 +3618,14 @@ const App: React.FC = () => {
             </div>
 
             {/* Export Buttons */}
-            <div className="flex flex-wrap gap-3 pt-2">
+            <div className="flex flex-wrap gap-3 pt-2 items-center">
               <button onClick={() => exportToExcel(students, 'Students')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Students Excel</button>
               <button onClick={() => exportStudentPDF(students)} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />Students PDF</button>
               <button onClick={() => exportToExcel(fees, 'Fees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Fees Excel</button>
               <button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Expenses Excel</button>
               <button onClick={() => exportToExcel(employees, 'Employees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Employees Excel</button>
+              <button onClick={() => exportFinancialReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Report (PDF)</button>
+              <button onClick={() => exportFinancialReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Report (PDF)</button>
             </div>
           </div>
         )}
