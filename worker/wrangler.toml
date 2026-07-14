@@ -1,4 +1,4 @@
-name = "school-os-ai-assistant"
+name = "school-os-start"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 
