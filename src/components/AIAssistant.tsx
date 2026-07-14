@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiMessageCircle, FiX, FiSend, FiPaperclip, FiTrash2, FiUser, FiCpu } from 'react-icons/fi';
-import { getAuth } from 'firebase/auth';
 import type { ChatMessage, AIResponse, AttachmentContent } from '../types/ai';
 
 const WORKER_URL = import.meta.env.VITE_AI_WORKER_URL || '';
@@ -96,13 +95,6 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
     setError(null);
 
     try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-      if (!user) {
-        throw new Error('You must be signed in to use the AI Assistant.');
-      }
-      const token = await user.getIdToken();
-
       const history = messages
         .filter(m => m.role !== 'error')
         .slice(-20)
@@ -112,7 +104,6 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           message: text,
@@ -128,18 +119,23 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
 
       const data: AIResponse = await res.json();
 
+      if (!data.text) {
+        throw new Error('AI returned an empty response');
+      }
+
       const assistantMessage: ChatMessage = {
         id: nextId(),
         role: 'assistant',
-        content: data.text || '(empty response)',
+        content: data.text,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err: any) {
+      console.error('AI Assistant fetch error:', err);
       const errorMessage: ChatMessage = {
         id: nextId(),
         role: 'error',
-        content: err.message || 'Failed to send message',
+        content: `Connection error: ${err?.message || err?.toString() || 'Failed to reach AI server'}. Make sure the worker is deployed and OPENROUTER_API_KEY is set.`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
