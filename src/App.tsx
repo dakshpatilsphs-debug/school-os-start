@@ -29,6 +29,7 @@ import { AppModals } from './Modals';
 import { AttendanceSection } from './Attendance';
 import { ScheduleSection } from './Schedule';
 import type { SalarySlipData } from './salarySlipTypes';
+import AIAssistant from './components/AIAssistant';
 
 type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'reminders' | 'schedule' | 'correction';
 
@@ -3093,6 +3094,8 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
+
+      <AIAssistant />
     </div>
   );
 };
