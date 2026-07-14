@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FiMessageCircle, FiX, FiSend, FiPaperclip, FiTrash2, FiUser, FiCpu } from 'react-icons/fi';
 import type { ChatMessage, AIResponse, AttachmentContent } from '../types/ai';
 
-const WORKER_URL = import.meta.env.VITE_AI_WORKER_URL || '';
+const WORKER_URL = import.meta.env.VITE_AI_WORKER_URL || 'https://school-os-start.dakshpatil-sphs.workers.dev';
 
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf', 'video/mp4', 'video/mpeg', 'video/quicktime', 'video/webm'];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB (worker enforces per-type limits)
