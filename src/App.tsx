@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   FiUsers, FiUser, FiDollarSign, FiTrendingDown, FiBarChart2, FiPlus, FiEdit2,
   FiTrash2, FiDownload, FiUpload, FiFileText, FiX, FiCheck, FiAlertCircle,
-  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiBell, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp
+  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiBell, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu
 } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -31,7 +31,7 @@ import { ScheduleSection } from './Schedule';
 import type { SalarySlipData } from './salarySlipTypes';
 import AIAssistant from './components/AIAssistant';
 
-type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'reminders' | 'schedule' | 'correction';
+type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'reminders' | 'schedule' | 'correction' | 'ai';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -2375,7 +2375,7 @@ const App: React.FC = () => {
     { name: 'Lost', value: equipments.filter(eq => eq.condition === 'Lost').length },
   ].filter(item => item.value > 0);
 
-  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reminders', icon: FiBell, label: 'Reminders' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }, { id: 'correction', icon: FiEdit2, label: 'Correction' }];
+  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reminders', icon: FiBell, label: 'Reminders' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }, { id: 'correction', icon: FiEdit2, label: 'Correction' }, { id: 'ai', icon: FiCpu, label: 'AI Assistant' }];
   const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : activeTab === 'students' ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : activeTab === 'reminders' ? 'Reminder Management' : 'Employee Management';
 
   const searchBtn = "flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 px-5 py-3 rounded-xl transition-all";
@@ -2528,7 +2528,7 @@ const App: React.FC = () => {
       <div className="ml-72 p-8">
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'ai' ? 'AI Assistant' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -2541,7 +2541,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!['students', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'reminders', 'schedule'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
+        {!['students', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'reminders', 'schedule', 'ai'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
 
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
@@ -3091,6 +3091,12 @@ const App: React.FC = () => {
               <button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Expenses Excel</button>
               <button onClick={() => exportToExcel(employees, 'Employees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Employees Excel</button>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'ai' && (
+          <div className="h-[calc(100vh-200px)]">
+            <AIAssistant variant="page" />
           </div>
         )}
       </div>
