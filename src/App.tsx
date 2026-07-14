@@ -859,7 +859,8 @@ const App: React.FC = () => {
         const emp = autoSalaryEmployees[i];
         if (!emp.salary || emp.salary <= 0) { skipped++; continue; }
         const seq = await getNextSequentialId('expenses');
-        await addExpense({ autoId: 'EXP-' + String(seq).padStart(3, '0'), category: 'Salaries', amount: emp.salary || 0, description: `AUTO-SALARY-${monthKey} | Monthly salary for ${emp.name}`, date: getTodayISO(), paidTo: emp.name, employeeId: emp.autoId, status: 'pending', billUrl: '' });
+        const salAmt = (emp.monthSalary?.[monthKey] ?? emp.salary) || 0;
+        await addExpense({ autoId: 'EXP-' + String(seq).padStart(3, '0'), category: 'Salaries', amount: salAmt, description: `AUTO-SALARY-${monthKey} | Monthly salary for ${emp.name}`, date: getTodayISO(), paidTo: emp.name, employeeId: emp.autoId, status: 'pending', billUrl: '' });
         created++;
       }
       if (manual) showNotification(created > 0 ? `Salary refresh created ${created} salary expense(s)` : 'No salary refresh needed today', 'success');
@@ -889,7 +890,7 @@ const App: React.FC = () => {
       if (modalType === 'edit' && currentRecord?.id) await updateEmployee(currentRecord.id, final);
       else { const seq = await getNextSequentialId('employees'); final.autoId = 'EMP-' + String(seq).padStart(3, '0'); await addEmployee(final); }
       closeModal();
-      setEmployeeForm({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
+      setEmployeeForm({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, oldSalary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
       await loadData();
       showNotification('Employee saved successfully', 'success');
     } catch (error) { showFirebaseError(error, 'Failed to save employee'); }
@@ -1180,7 +1181,7 @@ const App: React.FC = () => {
         }
       }
 
-      const monthlySalary = sd ? sd.salary.monthlyGross : (emp.salary || 0);
+      const monthlySalary = sd ? sd.salary.monthlyGross : ((emp.monthSalary?.[currentMonth] ?? emp.salary) || 0);
       const perDaySalary = sd ? sd.salary.perDaySalary : (workingDays > 0 ? monthlySalary / workingDays : 0);
       const earnedSalary = sd ? sd.salary.earnedSalary : Math.round(presentDays * perDaySalary);
 
@@ -1417,7 +1418,7 @@ const App: React.FC = () => {
       const isHol = hList.some(h => h && h.date === ds && h.type === 'manual');
       if (!isSun && !isHol) workingDays++;
     }
-    const monthlySalary = emp.salary || 0;
+    const monthlySalary = (emp.monthSalary?.[currentMonth] ?? emp.salary) || 0;
     const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
     const earnedSalary = Math.round(presentDays * perDaySalary);
     const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
@@ -1526,7 +1527,7 @@ const App: React.FC = () => {
       const empAttendance = attendance.filter(a => a.personId === emp.autoId && a.date.startsWith(month));
       const presentDays = empAttendance.filter(a => a.status === 'present').length;
       const absentDays = empAttendance.filter(a => a.status === 'absent').length;
-      const monthlySalary = emp.salary || 0;
+      const monthlySalary = (emp.monthSalary?.[month] ?? emp.salary) || 0;
       let workingDays = 0;
       for (let day = 1; day <= daysInMonth; day++) {
         const ds = `${month}-${String(day).padStart(2, '0')}`;
@@ -3096,6 +3097,7 @@ const App: React.FC = () => {
             getCausalLeaves={getCausalLeaves}
             deleteCausalLeave={deleteCausalLeave}
             logSalarySlipAudit={logSalarySlipAudit}
+            updateEmployee={updateEmployee}
           />
         )}
 

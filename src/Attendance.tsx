@@ -23,6 +23,7 @@ interface AttendanceProps {
   getCausalLeaves?: (employeeId: string) => Promise<any[]>;
   deleteCausalLeave?: (id: string) => Promise<void>;
   logSalarySlipAudit?: (employeeId: string) => Promise<void>;
+  updateEmployee: (id: string, data: any) => Promise<void>;
 }
 
 // Check if a date is a Sunday (auto holiday)
@@ -39,13 +40,16 @@ const isManualHoliday = (dateStr: string, holidays: Holiday[]) => {
 export const AttendanceSection: React.FC<AttendanceProps> = ({
   students, employees, attendance, holidays, schoolSettings, isReadOnly,
   saveBatchAttendance, saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
-  addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit
+  addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit, updateEmployee
 }) => {
   const [subTab, setSubTab] = useState<'student' | 'employee' | 'holidays' | 'causalLeaves'>('student');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [classFilter, setClassFilter] = useState('');
   const [selectedMonthlyStudentId, setSelectedMonthlyStudentId] = useState('');
   const [selectedMonthlyEmployeeId, setSelectedMonthlyEmployeeId] = useState('');
+  const [salaryType, setSalaryType] = useState<'new' | 'old'>('new');
+  const [editMonthSalary, setEditMonthSalary] = useState(false);
+  const [monthSalaryInput, setMonthSalaryInput] = useState('');
   const [attendanceChanges, setAttendanceChanges] = useState<Record<string, 'present' | 'absent'>>({});
   const [newHolidayDate, setNewHolidayDate] = useState('');
   const [newHolidayName, setNewHolidayName] = useState('');
@@ -871,7 +875,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     }
 
     // Salary based on present days out of working days
-    const monthlySalary = employee.salary || 0;
+    const monthlySalary = salaryType === 'old'
+      ? (employee.monthSalary?.[currentMonth] ?? employee.oldSalary ?? employee.salary)
+      : employee.salary;
     const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
     const earnedSalary = Math.round(presentDays * perDaySalary);
     const deductions = Math.round(absentDays * perDaySalary);
@@ -953,7 +959,10 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   // ===== Salary Breakdown (Earnings + Deductions components) =====
   // ===== Simplified Salary Calculation (earned salary based on attendance) =====
   const getSalaryBreakdown = (emp: Employee, si: any) => {
-    const gross = emp.salary || 0;
+    const currentMonth = selectedDate.substring(0, 7);
+    const gross = salaryType === 'old'
+      ? (emp.monthSalary?.[currentMonth] ?? emp.oldSalary ?? emp.salary)
+      : emp.salary;
     // Earned salary = present days × per day salary (NO deductions, NO allowances)
     const earnedSalary = si.netSalary || Math.round(si.presentDays * si.perDaySalary);
     return { earnedSalary, grossSalary: gross };
@@ -1135,6 +1144,32 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     <div className="flex items-center gap-2 mb-3">
                       <div className="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30"><p className="font-bold text-white">{selectedEmployee.name}</p><p className="text-xs text-cyan-400">{selectedEmployee.role} | {selectedEmployee.autoId}</p></div>
                       <div className="flex items-center gap-3 text-xs text-gray-400"><span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500"></span> Present</span><span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500"></span> Absent</span><span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-500"></span> Holiday</span></div>
+                    </div>
+                    <div className="flex items-center gap-3 mb-3 flex-wrap">
+                      <span className="text-xs text-gray-400">Salary:</span>
+                      <button type="button" onClick={() => { setSalaryType('new'); setEditMonthSalary(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'new' ? 'bg-cyan-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>New (₹{selectedEmployee.salary?.toLocaleString()})</button>
+                      <button type="button" onClick={() => { setSalaryType('old'); setSelectedMonthlyEmployeeId(''); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'old' ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>Old</button>
+                      {salaryType === 'old' && !editMonthSalary && (
+                        <button type="button" onClick={() => { const cur = selectedEmployee.monthSalary?.[selectedDate.substring(0, 7)]; setMonthSalaryInput(String(cur ?? selectedEmployee.oldSalary ?? selectedEmployee.salary ?? '')); setEditMonthSalary(true); }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30 transition">Update Salary for Month</button>
+                      )}
+                      {salaryType === 'old' && editMonthSalary && (
+                        <div className="flex items-center gap-2">
+                          <input type="number" value={monthSalaryInput} onChange={e => setMonthSalaryInput(e.target.value)} className="w-28 px-2 py-1.5 bg-gray-800 border border-yellow-500/50 rounded-lg text-white text-xs" placeholder="Amount" />
+                          <button type="button" onClick={async () => {
+                            const amt = parseFloat(monthSalaryInput);
+                            if (isNaN(amt) || amt < 0) { showNotification('Enter a valid amount', 'error'); return; }
+                            const currentMonth = selectedDate.substring(0, 7);
+                            const updated = { ...selectedEmployee.monthSalary, [currentMonth]: amt };
+                            try {
+                              await updateEmployee(selectedEmployee.id!, { ...selectedEmployee, monthSalary: updated });
+                              showNotification(`Salary for ${currentMonth} set to ₹${amt.toLocaleString()}`, 'success');
+                              setEditMonthSalary(false);
+                              loadData();
+                            } catch (e) { showNotification('Failed to update salary', 'error'); }
+                          }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-yellow-500 text-black hover:bg-yellow-400 transition">Save</button>
+                          <button type="button" onClick={() => setEditMonthSalary(false)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancel</button>
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2 pb-2">
                       {getSelectedMonthDays().map(day => {

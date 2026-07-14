@@ -35,6 +35,8 @@ export interface Employee {
   bankAccount?: string;
   panTaxId?: string;
 
+  oldSalary?: number;
+  monthSalary?: Record<string, number>;
   salaryAutoRefresh?: boolean;
   salaryRefreshDay?: number;
   inactiveDate?: string;
