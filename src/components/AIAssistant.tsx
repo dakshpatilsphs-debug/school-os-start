@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FiX, FiSend, FiPaperclip, FiUser, FiCpu } from 'react-icons/fi';
 import type { ChatMessage, AttachmentContent } from '../types/ai';
 
-const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY || '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';
+const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY || '';
 const OPENROUTER_MODEL = import.meta.env.VITE_OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
