@@ -37,6 +37,26 @@ const isManualHoliday = (dateStr: string, holidays: Holiday[]) => {
   return holidays.find(h => h.date === dateStr && h.type === 'manual');
 };
 
+// Get academic year start month (June to May) for a given monthKey (YYYY-MM)
+const getAcademicYearStart = (monthKey: string) => {
+  const [, month] = monthKey.split('-').map(Number);
+  const year = parseInt(monthKey.substring(0, 4));
+  const startYear = month >= 6 ? year : year - 1;
+  return `${startYear}-06`;
+};
+
+// Count total absent days for an employee from academic year start up to (but not including) the given month
+const getCLUsedBeforeMonth = (employeeId: string, monthKey: string, allAttendance: Att[]) => {
+  const academicYearStart = getAcademicYearStart(monthKey);
+  return allAttendance.filter(a => {
+    if (a.personId !== employeeId || a.status !== 'absent') return false;
+    const attMonth = a.date.substring(0, 7);
+    if (attMonth < academicYearStart) return false;
+    if (attMonth >= monthKey) return false;
+    return true;
+  }).length;
+};
+
 export const AttendanceSection: React.FC<AttendanceProps> = ({
   students, employees, attendance, holidays, schoolSettings, isReadOnly,
   saveBatchAttendance, saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
@@ -348,7 +368,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
     const data = activeEmps.map(e => {
       const si = getEmployeeSalaryInfo(e);
-      const autoCover = Math.min(si.absentDays, quota);
+      const clUsedBefore = getCLUsedBeforeMonth(e.autoId, currentMonth, attendance);
+      const remainingQuota = Math.max(0, quota - clUsedBefore);
+      const autoCover = Math.min(si.absentDays, remainingQuota);
       const effPresent = si.presentDays + autoCover;
       const effAbsent = Math.max(0, si.absentDays - autoCover);
       const effSalary = Math.round(effPresent * si.perDaySalary);
@@ -891,7 +913,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const info = getEmployeeSalaryInfo(emp);
     const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-    const autoCover = Math.min(info.absentDays, quota);
+    const clUsedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance);
+    const remainingQuota = Math.max(0, quota - clUsedBefore);
+    const autoCover = Math.min(info.absentDays, remainingQuota);
     const effectivePresent = info.presentDays + autoCover;
     const effectiveAbsent = Math.max(0, info.absentDays - autoCover);
     const perDaySalary = info.perDaySalary;
@@ -919,7 +943,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         presentDays: info.presentDays,
         absentDays: effectiveAbsent,
         casualLeavesUsed: autoCover,
-        casualLeavesRemaining: Math.max(0, quota - autoCover),
+        casualLeavesRemaining: Math.max(0, remainingQuota - autoCover),
       },
       salary: {
         monthlyGross: info.monthlySalary,
@@ -1233,10 +1257,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       {filteredEmployees.map(e => {
                         const info = getEmployeeSalaryInfo(e);
                         const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-                        const autoCover = Math.min(info.absentDays, quota);
+                        const clUsedBefore = getCLUsedBeforeMonth(e.autoId, selectedDate.substring(0, 7), attendance);
+                        const remainingQuota = Math.max(0, quota - clUsedBefore);
+                        const autoCover = Math.min(info.absentDays, remainingQuota);
                         const effAbsent = Math.max(0, info.absentDays - autoCover);
                         const effSalary = Math.round((info.presentDays + autoCover) * info.perDaySalary);
-                        const clLeft = Math.max(0, quota - autoCover);
+                        const clLeft = Math.max(0, remainingQuota - autoCover);
                         return (
                           <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>

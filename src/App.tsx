@@ -214,8 +214,8 @@ const App: React.FC = () => {
     pdfHeader(doc, 'Student Register', schoolSettings.pdfStudentSubtitle || 'All registered students with details', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
     if (students.length > 0) {
       autoTable(doc, {
-        head: [['ID', 'Name', 'Roll', 'Class', 'Parent', 'Phone', 'Fee', 'Documents', 'Status']],
-        body: students.map(s => { const docStatus = getStudentDocumentStatus(s); return [s.autoId, s.name, s.rollNumber, s.class, s.parentName, s.parentPhone, pdfMoney(s.feeAmount || 0), docStatus.summary, s.status]; }),
+        head: [['ID', 'Name', 'Roll', 'Class', 'Parent', 'Phone', 'Fee', 'Status']],
+        body: students.map(s => [s.autoId, s.name, s.rollNumber, s.class, s.parentName, s.parentPhone, pdfMoney(s.feeAmount || 0), s.status]),
         startY: 36, theme: 'striped',
         headStyles: { fillColor: c.primary, textColor: c.white, fontSize: bodySize, fontStyle: 'bold', cellPadding: 3 },
         bodyStyles: { fontSize: bodySize - 1, textColor: c.dark, cellPadding: 2.5 },
@@ -226,19 +226,13 @@ const App: React.FC = () => {
           3: { cellWidth: 14, halign: 'center' },
           5: { cellWidth: 24 },
           6: { cellWidth: 20, halign: 'right' },
-          8: { cellWidth: 16, halign: 'center' }
+          7: { cellWidth: 16, halign: 'center' }
         },
         margin: { left: 10, right: 10, bottom: 20 },
         didParseCell: (data) => {
-          if (data.section === 'body' && data.column.index === 8) {
+          if (data.section === 'body' && data.column.index === 7) {
             data.cell.styles.textColor = pdfStatusColor(String(data.cell.raw));
             data.cell.styles.fontStyle = 'bold';
-          }
-          if (data.section === 'body' && data.column.index === 7) {
-            const raw = String(data.cell.raw || '');
-            data.cell.styles.fontSize = bodySize - 2;
-            if (raw.includes('Missing')) data.cell.styles.textColor = [239, 68, 68];
-            else if (raw.includes('Submitted')) data.cell.styles.textColor = [16, 185, 129];
           }
         }
       });
@@ -327,8 +321,8 @@ const App: React.FC = () => {
     doc.text(pdfMoney(fees.reduce((s, f) => s + f.amount, 0)), 165, fy + 15);
     if (fees.length > 0) {
       autoTable(doc, {
-        head: [['ID', 'Student', 'Amount', 'Type', 'Due Date', 'Paid Date', 'Status']],
-        body: fees.map(f => [f.autoId, f.studentName, pdfMoney(f.amount), f.type, f.dueDate, f.paidDate, f.status]),
+        head: [['ID', 'Student', 'Amount', 'Type', 'Description', 'Paid Date', 'Status']],
+        body: fees.map(f => [f.autoId, f.studentName, pdfMoney(f.amount), f.type, f.description || '-', f.paidDate, f.status]),
         startY: fy + 26, theme: 'striped',
         headStyles: { fillColor: c.primary, textColor: c.white, fontSize: bodySize, fontStyle: 'bold', cellPadding: 3 },
         bodyStyles: { fontSize: bodySize - 1, textColor: c.dark, cellPadding: 2.5 },
@@ -1148,12 +1142,9 @@ const App: React.FC = () => {
     showNotification('Offer letter PDF generated', 'success');
   };
 
-  const drawSalarySlipPDF = (doc: any, emp: Employee, currentMonth: string, monthName: string, casualLeavesUsed: number = 0, salaryData?: SalarySlipData) => {
+  const drawSalarySlipPDF = (doc: any, emp: Employee, currentMonth: string, monthName: string, _casualLeavesUsed: number = 0, salaryData?: SalarySlipData) => {
     try {
       const sd = salaryData;
-      const clUsed = sd ? sd.attendance.casualLeavesUsed : casualLeavesUsed;
-      const quota = sd ? sd.attendance.casualLeavesRemaining + clUsed : Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-      const clRemaining = sd ? sd.attendance.casualLeavesRemaining : Math.max(0, quota - casualLeavesUsed);
       const pw = 210, ML = 14, MR = pw - 14, CW = MR - ML;
 
       const primary = [14, 165, 233] as [number, number, number];
@@ -1184,6 +1175,26 @@ const App: React.FC = () => {
       const monthlySalary = sd ? sd.salary.monthlyGross : ((emp.monthSalary?.[currentMonth] ?? emp.salary) || 0);
       const perDaySalary = sd ? sd.salary.perDaySalary : (workingDays > 0 ? monthlySalary / workingDays : 0);
       const earnedSalary = sd ? sd.salary.earnedSalary : Math.round(presentDays * perDaySalary);
+
+      // CL yearly quota (academic year June–May)
+      const clQuotaVal = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
+      let clUsedNum = 0, clRemainingNum = 0;
+      if (sd) {
+        clUsedNum = sd.attendance.casualLeavesUsed;
+        clRemainingNum = sd.attendance.casualLeavesRemaining;
+      } else {
+        const [yr, mo] = currentMonth.split('-').map(Number);
+        const startYear = mo >= 6 ? yr : yr - 1;
+        const academicYearStart = `${startYear}-06`;
+        const clUsedBefore = attendance.filter(a =>
+          a.personId === emp.autoId && a.status === 'absent' &&
+          a.date.substring(0, 7) >= academicYearStart &&
+          a.date.substring(0, 7) < currentMonth
+        ).length;
+        const remainingQuota = Math.max(0, clQuotaVal - clUsedBefore);
+        clUsedNum = Math.min(absentDays, remainingQuota);
+        clRemainingNum = Math.max(0, remainingQuota - clUsedNum);
+      }
 
       // ── CSS-derived design tokens (from SalarySlip.css) ──
       const sBorder = [226, 232, 240] as const;
@@ -1270,7 +1281,7 @@ const App: React.FC = () => {
         ['Date of Joining', sd ? sd.employee.dateOfJoining : (emp.joinDate || '-')],
         ['Bank / Account No.', sd ? sd.employee.bankAccount : (emp.bankAccount || emp.panTaxId || '-')],
         ['PAN / Tax ID', sd ? (sd.employee.panTaxId || '-') : (emp.panTaxId || '-')],
-        ['CL Used / Remaining', String(clUsed) + ' / ' + String(clRemaining)],
+        ['CL Used / Remaining', String(clUsedNum) + ' / ' + String(clRemainingNum)],
       ]);
       y = y + cardH + padMd + 2;
 
@@ -1422,6 +1433,18 @@ const App: React.FC = () => {
     const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
     const earnedSalary = Math.round(presentDays * perDaySalary);
     const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
+    const startYear = month >= 6 ? year : year - 1;
+    const academicYearStart = `${startYear}-06`;
+    const clUsedBefore = attendance.filter(a =>
+      a.personId === emp.autoId && a.status === 'absent' &&
+      a.date.substring(0, 7) >= academicYearStart &&
+      a.date.substring(0, 7) < currentMonth
+    ).length;
+    const remainingQuota = Math.max(0, quota - clUsedBefore);
+    const autoCover = Math.min(absentDays, remainingQuota);
+    const effectiveAbsent = Math.max(0, absentDays - autoCover);
+    const effectivePresent = presentDays + autoCover;
+    const effectiveEarnedSalary = Math.round(effectivePresent * perDaySalary);
     return {
       school: {
         name: (schoolSettings?.schoolName || 'School OS').toUpperCase(),
@@ -1442,14 +1465,14 @@ const App: React.FC = () => {
       attendance: {
         workingDays,
         presentDays,
-        absentDays,
-        casualLeavesUsed: 0,
-        casualLeavesRemaining: quota,
+        absentDays: effectiveAbsent,
+        casualLeavesUsed: autoCover,
+        casualLeavesRemaining: Math.max(0, remainingQuota - autoCover),
       },
       salary: {
         monthlyGross: monthlySalary,
         perDaySalary: Math.round(perDaySalary),
-        earnedSalary,
+        earnedSalary: effectiveEarnedSalary,
         allowances: 0,
         deductions: 0,
       },
@@ -1538,11 +1561,19 @@ const App: React.FC = () => {
       }
       const perDaySalary = monthlySalary / (workingDays || 1);
       const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-      const autoCover = Math.min(absentDays, quota);
+      const startYear = mo >= 6 ? yr : yr - 1;
+      const academicYearStart = `${startYear}-06`;
+      const clUsedBefore = attendance.filter(a =>
+        a.personId === emp.autoId && a.status === 'absent' &&
+        a.date.substring(0, 7) >= academicYearStart &&
+        a.date.substring(0, 7) < month
+      ).length;
+      const remainingQuota = Math.max(0, quota - clUsedBefore);
+      const autoCover = Math.min(absentDays, remainingQuota);
       const effPresent = presentDays + autoCover;
       const effAbsent = Math.max(0, absentDays - autoCover);
       const earnedSalary = Math.round(effPresent * perDaySalary);
-      const clLeft = Math.max(0, quota - autoCover);
+      const clLeft = Math.max(0, remainingQuota - autoCover);
 
       // Build daily grid only for visual (mark only days with actual attendance records)
       const daily: { day: number; status: string }[] = [];
@@ -1635,8 +1666,7 @@ const App: React.FC = () => {
         doc.text(e.name, colName, y + 4.5);
         doc.setTextColor(...sTextSec);
         doc.text(String(e.presentDays), colPD, y + 4.5);
-        const adClr = e.absentDays > e.autoCover ? [220, 38, 38] as const : sTextSec;
-        doc.setTextColor(...adClr);
+        if (e.absentDays > e.autoCover) doc.setTextColor(220, 38, 38); else doc.setTextColor(...sTextSec);
         doc.text(String(e.absentDays), colAD, y + 4.5);
         doc.setTextColor(6, 182, 212);
         doc.text(String(e.autoCover), colCLU, y + 4.5);
@@ -2021,6 +2051,257 @@ const App: React.FC = () => {
 
     doc.save('Financial_Report.pdf');
     showNotification('Financial report PDF exported successfully', 'success');
+  };
+
+  const exportStudentInvoicePDF = (classFilter?: string) => {
+    const activeStudents = students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter));
+    if (activeStudents.length === 0) { showNotification('No students found', 'error'); return; }
+
+    const doc = new jsPDF('p', 'mm', [148, 210]);
+    const pw = 148, ML = 8, MR = pw - ML, CW = MR - ML;
+    const accent: [number, number, number] = [14, 165, 233];
+    const dark = [30, 41, 59] as const;
+    const muted = [100, 116, 139] as const;
+    const border = [226, 232, 240] as const;
+    const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
+
+    activeStudents.forEach((student, idx) => {
+      if (idx > 0) doc.addPage();
+      const studentFees = fees.filter(f => f.studentId === student.autoId);
+      const info = getStudentPaymentInfo(student);
+
+      // ── School Header ──
+      doc.setFillColor(accent[0], accent[1], accent[2]); doc.rect(0, 0, pw, 28, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+      doc.text((schoolSettings.schoolName || 'School OS').toUpperCase(), pw / 2, 11, { align: 'center' });
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+      if (schoolSettings.address) doc.text(schoolSettings.address, pw / 2, 18, { align: 'center' });
+      if (schoolSettings.phone) doc.text('Phone: ' + schoolSettings.phone + '  |  Email: ' + (schoolSettings.email || ''), pw / 2, 24, { align: 'center' });
+
+      // ── Invoice Title ──
+      let y = 34;
+      doc.setTextColor(dark[0], dark[1], dark[2]); doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+      doc.text('INVOICE', ML, y);
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.setTextColor(...muted);
+      doc.text('Invoice #: ' + student.autoId + ' | Date: ' + new Date().toLocaleDateString(), MR, y, { align: 'right' });
+      y += 8;
+
+      // ── Student Details ──
+      doc.setFillColor(248, 250, 252); doc.rect(ML, y, CW, 16, 'F');
+      doc.setDrawColor(...border); doc.setLineWidth(0.3); doc.rect(ML, y, CW, 16, 'S');
+      doc.setFontSize(6.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(dark[0], dark[1], dark[2]);
+      const half = ML + CW / 2;
+      doc.text('Student Name:', ML + 3, y + 4);
+      doc.text('Class:', half + 3, y + 4);
+      doc.text('Package:', ML + 3, y + 9);
+      doc.text('Parent:', half + 3, y + 9);
+      doc.text('Auto ID:', ML + 3, y + 14);
+      doc.text('Status:', half + 3, y + 14);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(...muted);
+      doc.text(student.name, ML + 30, y + 4);
+      doc.text(student.class || '-', half + 30, y + 4);
+      doc.text('Rs ' + (student.feeAmount || 0).toLocaleString(), ML + 30, y + 9);
+      doc.text(student.parentName || '-', half + 30, y + 9);
+      doc.text(student.autoId, ML + 30, y + 14);
+      doc.text(info.paymentStatus, half + 30, y + 14);
+      y += 22;
+
+      // ── Fee Table ──
+      doc.setFillColor(accent[0], accent[1], accent[2]); doc.rect(ML, y, CW, 6, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(6.5); doc.setFont('helvetica', 'bold');
+      doc.text('Type', ML + 2, y + 4.5);
+      doc.text('Amount', ML + 50, y + 4.5);
+      doc.text('Paid Date', ML + 75, y + 4.5);
+      doc.text('Description', ML + 100, y + 4.5);
+      doc.text('Status', MR - 2, y + 4.5, { align: 'right' });
+      y += 7;
+
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal');
+      studentFees.forEach((f, fi) => {
+        if (fi % 2 === 0) { doc.setFillColor(252, 252, 252); doc.rect(ML, y, CW, 5.5, 'F'); }
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text(f.type, ML + 2, y + 4);
+        doc.text(money(f.amount), ML + 50, y + 4);
+        doc.text(f.paidDate || '-', ML + 75, y + 4);
+        doc.text(f.description || '-', ML + 100, y + 4);
+        const stClr = f.status === 'paid' ? [16, 185, 129] as const : f.status === 'overdue' ? [239, 68, 68] as const : [245, 158, 11] as const;
+        doc.setTextColor(stClr[0], stClr[1], stClr[2]); doc.setFont('helvetica', 'bold');
+        doc.text(f.status.toUpperCase(), MR - 2, y + 4, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setDrawColor(...border); doc.setLineWidth(0.03); doc.line(ML, y + 5.5, MR, y + 5.5);
+        y += 5.5;
+      });
+
+      // ── Totals ──
+      y += 1;
+      doc.setDrawColor(...accent); doc.setLineWidth(0.3); doc.line(ML, y, MR, y);
+      y += 2;
+      doc.setFontSize(6.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(dark[0], dark[1], dark[2]);
+      doc.text('Total Fees Paid:', ML + 2, y + 4);
+      doc.text(money(info.totalPaid), MR - 2, y + 4, { align: 'right' });
+      y += 5;
+      doc.setTextColor(245, 158, 11); doc.text('Balance Due:', ML + 2, y + 4);
+      doc.text(money(info.balance), MR - 2, y + 4, { align: 'right' });
+      y += 5;
+      if (info.totalOverdue > 0) {
+        doc.setTextColor(239, 68, 68); doc.text('Overdue:', ML + 2, y + 4);
+        doc.text(money(info.totalOverdue), MR - 2, y + 4, { align: 'right' });
+        y += 5;
+      }
+
+      // ── Footer ──
+      doc.setDrawColor(...border); doc.setLineWidth(0.08); doc.line(ML, 196, MR, 196);
+      doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...muted);
+      doc.text('Generated by School Management System | ' + new Date().toLocaleString(), pw / 2, 201, { align: 'center' });
+    });
+
+    doc.save('Student_Invoices.pdf');
+    showNotification('Student invoices exported successfully', 'success');
+  };
+
+  const exportFeeTransactionsPDF = () => {
+    if (fees.length === 0) { showNotification('No fee records found', 'error'); return; }
+    const doc = new jsPDF();
+    const pw = 210;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const bodySize = schoolSettings.pdfBodySize || 10;
+    pdfHeader(doc, 'Fee Transactions', 'All recorded fee transactions', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+    autoTable(doc, {
+      head: [['ID', 'Student', 'Amount', 'Type', 'Description', 'Paid Date', 'Status']],
+      body: fees.map(f => [f.autoId, f.studentName, pdfMoney(f.amount), f.type, f.description || '-', f.paidDate || '-', f.status]),
+      startY: 36, theme: 'striped',
+      headStyles: { fillColor: c.primary, textColor: c.white, fontSize: bodySize, fontStyle: 'bold', cellPadding: 3 },
+      bodyStyles: { fontSize: bodySize - 1, textColor: c.dark, cellPadding: 2.5 },
+      alternateRowStyles: { fillColor: c.light },
+      columnStyles: { 2: { halign: 'right' }, 6: { halign: 'center' } },
+      margin: { left: 10, right: 10, bottom: 20 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 6) {
+          data.cell.styles.textColor = pdfStatusColor(String(data.cell.raw));
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    });
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save('Fee_Transactions.pdf');
+    showNotification('Fee transactions PDF exported successfully', 'success');
+  };
+
+  const exportFeeInvoice = (fee: Fee) => {
+    const student = students.find(s => s.autoId === fee.studentId);
+    if (!student) { showNotification('Student not found', 'error'); return; }
+
+    const doc = new jsPDF('p', 'mm', [148, 210]);
+    const pw = 148, ML = 8, MR = pw - ML, CW = MR - ML;
+
+    // ── Corporate palette ──
+    const navy: [number, number, number] = [27, 42, 74];
+    const gold: [number, number, number] = [184, 150, 15];
+    const dark = [30, 41, 59] as const;
+    const muted = [100, 116, 139] as const;
+    const lightBg = [248, 249, 250] as const;
+    const border = [226, 232, 240] as const;
+    const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
+
+    // ── Top accent bar ──
+    doc.setFillColor(navy[0], navy[1], navy[2]); doc.rect(0, 0, pw, 3, 'F');
+    doc.setFillColor(gold[0], gold[1], gold[2]); doc.rect(0, 3, pw, 0.5, 'F');
+
+    // ── School / Invoice header ──
+    doc.setTextColor(navy[0], navy[1], navy[2]); doc.setFontSize(13); doc.setFont('times', 'bold');
+    doc.text((schoolSettings.schoolName || 'School OS').toUpperCase(), ML, 14);
+    doc.setFontSize(10); doc.setFont('times', 'normal'); doc.setTextColor(...muted);
+    if (schoolSettings.address) doc.text(schoolSettings.address, ML, 20);
+    if (schoolSettings.phone) doc.text('Phone: ' + schoolSettings.phone + '  |  ' + (schoolSettings.email || ''), ML, 25);
+
+    doc.setFontSize(11); doc.setFont('times', 'bold'); doc.setTextColor(gold[0], gold[1], gold[2]);
+    doc.text('INVOICE', MR, 14, { align: 'right' });
+    doc.setDrawColor(gold[0], gold[1], gold[2]); doc.setLineWidth(0.12);
+    doc.line(ML, 28, MR, 28);
+
+    // ── Billing details ──
+    let y = 34;
+    doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.text('BILL TO', ML, y); y += 4;
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.setFontSize(8); doc.text(student.name, ML, y); y += 4;
+    doc.setFontSize(7); doc.setTextColor(...muted);
+    doc.text(student.class || '', ML, y); y += 3.5;
+    doc.text('ID: ' + student.autoId, ML, y); y += 3.5;
+    doc.text('Parent: ' + (student.parentName || '-'), ML, y);
+
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFontSize(7);
+    doc.text('INVOICE #', MR - 25, 34); doc.text('DATE', MR - 25, 39); doc.text('STATUS', MR - 25, 44);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...muted);
+    doc.text(fee.autoId, MR - 2, 34, { align: 'right' });
+    doc.text(fee.paidDate || fee.dueDate || '-', MR - 2, 39, { align: 'right' });
+    const stClr = fee.status === 'paid' ? [16, 185, 129] as const : fee.status === 'overdue' ? [239, 68, 68] as const : [245, 158, 11] as const;
+    doc.setTextColor(stClr[0], stClr[1], stClr[2]);
+    doc.text(fee.status.toUpperCase(), MR - 2, 44, { align: 'right' });
+
+    y = 52;
+
+    // ── Fee details table ──
+    doc.setFillColor(navy[0], navy[1], navy[2]); doc.rect(ML, y, CW, 7, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFontSize(6.5); doc.setFont('helvetica', 'bold');
+    doc.text('TYPE', ML + 2.5, y + 5);
+    doc.text('AMOUNT', ML + 55, y + 5);
+    doc.text('PAID DATE', ML + 80, y + 5);
+    doc.text('DESCRIPTION', MR - 2, y + 5, { align: 'right' });
+    y += 8;
+
+    doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]); doc.rect(ML, y, CW, 6.5, 'F');
+    doc.setTextColor(dark[0], dark[1], dark[2]); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+    doc.text(fee.type, ML + 2.5, y + 4.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text(money(fee.amount), ML + 55, y + 4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text(fee.paidDate || '-', ML + 80, y + 4.5);
+    doc.text(fee.description || '-', MR - 2, y + 4.5, { align: 'right' });
+    y += 7.5;
+
+    doc.setDrawColor(...border); doc.setLineWidth(0.08); doc.line(ML, y, MR, y);
+    y += 3;
+
+    // ── Totals ──
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.text('TOTAL AMOUNT', ML + 2.5, y + 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(gold[0], gold[1], gold[2]);
+    doc.text(money(fee.amount), MR - 2, y + 4, { align: 'right' });
+    y += 10;
+
+    // ── Divider ──
+    doc.setDrawColor(gold[0], gold[1], gold[2]); doc.setLineWidth(0.15);
+    doc.line(ML, y, MR, y);
+    y += 5;
+
+    // ── Payment Terms ──
+    doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.text('PAYMENT TERMS', ML, y); y += 4;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...muted);
+    doc.text('This invoice is valid for the fee transaction referenced above.', ML, y); y += 3.5;
+    doc.text('Any discrepancies must be reported within 7 days of receipt.', ML, y); y += 3.5;
+    doc.text('Thank you for your business.', ML, y);
+    y += 7;
+
+    // ── Signature Block ──
+    doc.setDrawColor(...border); doc.setLineWidth(0.08);
+    doc.line(ML, y, ML + 40, y);
+    doc.line(MR - 40, y, MR, y);
+    y += 2;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(...muted);
+    doc.text('Authorised Signature', ML, y + 3);
+    doc.text('School Seal', MR - 2, y + 3, { align: 'right' });
+
+    // ── Footer accent bar ──
+    doc.setFillColor(gold[0], gold[1], gold[2]); doc.rect(0, 206, pw, 0.5, 'F');
+    doc.setFillColor(navy[0], navy[1], navy[2]); doc.rect(0, 206.5, pw, 2.5, 'F');
+    doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(255, 255, 255);
+    doc.text('Generated by School Management System | ' + new Date().toLocaleString(), pw / 2, 208.5, { align: 'center' });
+
+    doc.save('Invoice_' + fee.autoId + '.pdf');
+    showNotification('Invoice exported successfully', 'success');
   };
 
   const resetEquipmentForm = () => {
@@ -3177,16 +3458,16 @@ const App: React.FC = () => {
                 <option value="">All Classes</option>
                 {[...new Set(students.map(s => s.class).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Fee</button>}<button onClick={() => exportToExcel(fees, 'Fees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportToPDF(fees, 'Fees Report')} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button></div>
+              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Fee</button>}<button onClick={() => exportToExcel(fees, 'Fees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={exportFeeTransactionsPDF} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button><button onClick={() => exportStudentInvoicePDF(studentClassFilter || undefined)} className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiFileText size={18} />Invoice (A5)</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
-              <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Type</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Due Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
+              <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Type</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Description</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
               <tbody>{fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).map(f => (
-                <tr key={f.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
-                  <td className="px-6 py-4 font-mono text-cyan-400">{f.autoId}</td><td className="px-6 py-4 font-semibold">{f.studentName}</td><td className="px-6 py-4 font-semibold">₹{f.amount.toLocaleString()}</td><td className="px-6 py-4">{f.type}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{f.dueDate}</td>
+                  <tr key={f.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
+                    <td className="px-6 py-4 font-mono text-cyan-400">{f.autoId}</td><td className="px-6 py-4 font-semibold">{f.studentName}</td><td className="px-6 py-4 font-semibold">₹{f.amount.toLocaleString()}</td><td className="px-6 py-4">{f.type}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{f.description || '-'}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${getEffectiveFeeStatus(f) === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : getEffectiveFeeStatus(f) === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{getEffectiveFeeStatus(f)}</span></td>
                   <td className="px-6 py-4">{f.billUrl && <button onClick={() => previewBill(f.billUrl!)} className="text-cyan-400 hover:text-cyan-300"><FiImage size={18} /></button>}</td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(f, 'fee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(f.id!, 'fee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => exportFeeInvoice(f)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download Invoice"><FiFileText size={18} /></button><button onClick={() => openEditModal(f, 'fee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(f.id!, 'fee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
               ))}</tbody>
             </table></div></div>
