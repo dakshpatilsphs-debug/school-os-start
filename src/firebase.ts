@@ -297,7 +297,7 @@ export const deleteTeacherSubject = async (id: string) =>
 export const saveSubjectConfig = async (config: any) => {
   const q = query(collection(db, 'subjectConfigs'), where('class', '==', config.class), where('subjectId', '==', config.subjectId));
   const snap = await getDocs(q);
-  const data = { class: config.class, subjectId: config.subjectId, subjectName: config.subjectName, periodsPerWeek: config.periodsPerWeek, doubled: config.doubled, updatedAt: Timestamp.now() };
+  const data = { class: config.class, subjectId: config.subjectId, subjectName: config.subjectName, doubled: config.doubled, allowSameDay: config.allowSameDay ?? false, noTeacher: config.noTeacher ?? false, updatedAt: Timestamp.now() };
   if (snap.empty) {
     const ref = await addDoc(collection(db, 'subjectConfigs'), { ...data, createdAt: Timestamp.now() });
     return ref.id;

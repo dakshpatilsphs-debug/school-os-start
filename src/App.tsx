@@ -3665,6 +3665,7 @@ const App: React.FC = () => {
           <ScheduleSection
             employees={employees}
             students={students}
+            schoolSettings={schoolSettings}
             showNotification={showNotification}
             addSubject={addSubject}
             getSubjects={getSubjects}

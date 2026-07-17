@@ -3,10 +3,13 @@ import { FiBookOpen, FiUsers, FiCalendar, FiPlus, FiEdit2, FiTrash2, FiSave, FiX
 import type { Subject, TeacherSubject, TimetableEntry, PeriodSlot, Employee, Student, SubjectConfig } from './types';
 import { WEEKDAYS, DEFAULT_PERIODS } from './types';
 import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { getPDFColorsFromSettings } from './PDFHelper';
 
 interface ScheduleSectionProps {
   employees: Employee[];
   students: Student[];
+  schoolSettings: any;
   showNotification: (msg: string, type: 'success' | 'error') => void;
   addSubject: (s: any) => Promise<any>;
   getSubjects: () => Promise<any[]>;
@@ -27,7 +30,7 @@ interface ScheduleSectionProps {
 type ScheduleTab = 'subjects' | 'assign' | 'timetable' | 'settings';
 
 export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
-  employees, students, showNotification,
+  employees, students, schoolSettings, showNotification,
   addSubject, getSubjects, updateSubject, deleteSubject,
   saveTeacherSubjects, getTeacherSubjects, deleteTeacherSubject,
   saveTimetableEntries, getTimetableEntries, deleteTimetableForClass, deleteTimetableEntry,
@@ -167,14 +170,14 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const getConfigForSubject = (subjectId: string): SubjectConfig | undefined =>
     subjectConfigs.find(c => c.class === configClass && c.subjectId === subjectId);
 
-  const updateSubjectConfig = (subjectId: string, subjectName: string, field: 'periodsPerWeek' | 'doubled', value: number | boolean) => {
+  const updateSubjectConfig = (subjectId: string, subjectName: string, field: 'doubled' | 'allowSameDay' | 'noTeacher', value: boolean) => {
     setSubjectConfigs(prev => {
       const existing = prev.findIndex(c => c.class === configClass && c.subjectId === subjectId);
       const updated = [...prev];
       if (existing >= 0) {
         updated[existing] = { ...updated[existing], [field]: value };
       } else {
-        updated.push({ class: configClass, subjectId, subjectName, periodsPerWeek: 1, doubled: false, [field]: value });
+        updated.push({ class: configClass, subjectId, subjectName, doubled: false, [field]: value });
       }
       return updated;
     });
@@ -186,7 +189,14 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     const classConfigs = subjectConfigs.filter(c => c.class === configClass);
     try {
       for (const cfg of classConfigs) {
-        await saveSubjectConfig({ class: cfg.class, subjectId: cfg.subjectId, subjectName: cfg.subjectName, periodsPerWeek: cfg.periodsPerWeek, doubled: cfg.doubled });
+        await saveSubjectConfig({
+          class: cfg.class,
+          subjectId: cfg.subjectId,
+          subjectName: cfg.subjectName || '',
+          doubled: cfg.doubled ?? false,
+          allowSameDay: cfg.allowSameDay ?? false,
+          noTeacher: cfg.noTeacher ?? false,
+        });
       }
       await loadSubjectConfigs();
       setConfigDirty(false);
@@ -242,247 +252,118 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
       const pairs = Array.from(pairMap.values());
       if (pairs.length === 0) { showNotification('No subjects assigned to teachers', 'error'); setLoading(false); return; }
 
-      const totalSlots = WEEKDAYS.length * numPeriods;
+      const filledSlots = new Set<string>();
+      const entries: any[] = [];
+      const subjectDayCount = new Map<string, number>();
 
-      // Step 1: Determine periods per subject — configured subjects get exact count, others get even share of remaining
-      const periodsPerSubject = new Map<string, number>();
-      const doubledSet = new Set<string>();
-      let configuredUsed = 0;
+      const doPlace = (subjectId: string, subjectName: string, teacherId: string, teacherName: string, day: string, p: number, span: number) => {
+        const slotKey = `${day}_${p}`;
+        if (span === 2) {
+          const nextKey = `${day}_${p + 1}`;
+          if (filledSlots.has(nextKey)) return false;
+          const slot = periodSlots[p - 1];
+          const nextSlot = periodSlots[p];
+          entries.push({ class: selectedClass, day, period: p, subjectId, subjectName, teacherId, teacherName, startTime: slot.startTime, endTime: slot.endTime });
+          entries.push({ class: selectedClass, day, period: p + 1, subjectId, subjectName, teacherId, teacherName, startTime: nextSlot.startTime, endTime: nextSlot.endTime });
+          filledSlots.add(slotKey);
+          filledSlots.add(nextKey);
+          return true;
+        }
+        const slot = periodSlots[p - 1];
+        entries.push({ class: selectedClass, day, period: p, subjectId, subjectName, teacherId, teacherName, startTime: slot.startTime, endTime: slot.endTime });
+        filledSlots.add(slotKey);
+        return true;
+      };
+
+      // Categorize subjects
+      const doubledSubjects: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
+      const regularSubjects: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
+      const noTeacherSubjects: Array<{ subjectId: string; subjectName: string }> = [];
+      const unassignedSubjects: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
 
       for (const pair of pairs) {
         const cfg = subjectConfigs.find(c => c.class === selectedClass && c.subjectId === pair.subjectId);
-        if (cfg && cfg.periodsPerWeek > 0) {
-          const n = cfg.doubled ? Math.floor(cfg.periodsPerWeek / 2) * 2 : cfg.periodsPerWeek;
-          periodsPerSubject.set(pair.subjectId, n);
-          if (cfg.doubled && n >= 2) doubledSet.add(pair.subjectId);
-          configuredUsed += n;
+        if (cfg?.noTeacher) {
+          noTeacherSubjects.push({ subjectId: pair.subjectId, subjectName: pair.subjectName });
+        } else if (cfg?.doubled) {
+          doubledSubjects.push({ ...pair });
+        } else if (cfg) {
+          regularSubjects.push(pair);
+        } else {
+          unassignedSubjects.push(pair);
         }
       }
 
-      const remainingSlots = totalSlots - configuredUsed;
-      if (remainingSlots < 0) {
-        showNotification(`Not enough slots (need ${configuredUsed}, have ${totalSlots}). Reduce periods per week.`, 'error');
-        setLoading(false); return;
-      }
-
-      // Distribute remaining slots among unconfigured subjects
-      const unconfigured = pairs.filter(p => !periodsPerSubject.has(p.subjectId));
-      if (unconfigured.length > 0) {
-        const perSubject = Math.floor(remainingSlots / unconfigured.length);
-        const extra = remainingSlots % unconfigured.length;
-        for (let i = 0; i < unconfigured.length; i++) {
-          periodsPerSubject.set(unconfigured[i].subjectId, perSubject + (i < extra ? 1 : 0));
-        }
-      } else if (remainingSlots > 0) {
-        // All subjects configured, distribute remaining among all
-        for (const pair of pairs) {
-          const cur = periodsPerSubject.get(pair.subjectId) || 0;
-          periodsPerSubject.set(pair.subjectId, cur + Math.floor(remainingSlots / pairs.length));
-        }
-        let leftover = remainingSlots % pairs.length;
-        for (let i = 0; i < leftover && i < pairs.length; i++) {
-          const cur = periodsPerSubject.get(pairs[i].subjectId) || 0;
-          periodsPerSubject.set(pairs[i].subjectId, cur + 1);
-        }
-      }
-
-      type AllocItem = { subjectId: string; subjectName: string; teacherId: string; teacherName: string; span: number };
-      const allocation: AllocItem[] = [];
-
-      // Step 2: Build allocation list from periodsPerSubject
-      for (const pair of pairs) {
-        const count = periodsPerSubject.get(pair.subjectId) || 0;
-        const doubled = doubledSet.has(pair.subjectId);
-        let remaining = count;
-        while (remaining > 0) {
-          if (doubled && remaining >= 2) {
-            allocation.push({ ...pair, span: 2 });
-            remaining -= 2;
-          } else {
-            allocation.push({ ...pair, span: 1 });
-            remaining -= 1;
-          }
-        }
-      }
-
-      // Step 3: Shuffle and sort so doubles come first
-      for (let i = allocation.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [allocation[i], allocation[j]] = [allocation[j], allocation[i]];
-      }
-      allocation.sort((a, b) => b.span - a.span);
-
-      // Step 4: Place into grid with day-level constraints
-      const usedTeacherSlots = new Set<string>();
-      const filledSlots = new Set<string>();
-      const entries: any[] = [];
-      const remainingAlloc = [...allocation];
-      const subjectDayCount = new Map<string, number>(); // key: `${subjectId}_${day}`
-      const doubledDays = new Set<string>();            // days that already have a doubled pair
-
-      const placeItem = (item: AllocItem, day: string, p: number) => {
-        const slotKey = `${day}_${p}`;
-        const teacherKey = `${item.teacherId}_${day}_${p}`;
-        if (item.span === 2 && p + 1 <= numPeriods) {
-          const nextKey = `${day}_${p + 1}`;
-          if (filledSlots.has(nextKey)) return false;
-          const nextTeacherKey = `${item.teacherId}_${day}_${p + 1}`;
-          const slot = periodSlots[p - 1];
-          const nextSlot = periodSlots[p];
-          entries.push({ class: selectedClass, day, period: p, subjectId: item.subjectId, subjectName: item.subjectName, teacherId: item.teacherId, teacherName: item.teacherName, startTime: slot.startTime, endTime: slot.endTime });
-          entries.push({ class: selectedClass, day, period: p + 1, subjectId: item.subjectId, subjectName: item.subjectName, teacherId: item.teacherId, teacherName: item.teacherName, startTime: nextSlot.startTime, endTime: nextSlot.endTime });
-          usedTeacherSlots.add(teacherKey);
-          usedTeacherSlots.add(nextTeacherKey);
-          filledSlots.add(slotKey);
-          filledSlots.add(nextKey);
-          doubledDays.add(day);
-          return true;
-        }
-        if (item.span === 1) {
-          const slot = periodSlots[p - 1];
-          entries.push({ class: selectedClass, day, period: p, subjectId: item.subjectId, subjectName: item.subjectName, teacherId: item.teacherId, teacherName: item.teacherName, startTime: slot.startTime, endTime: slot.endTime });
-          usedTeacherSlots.add(teacherKey);
-          filledSlots.add(slotKey);
-          return true;
-        }
-        return false;
-      };
-
+      // Place each day — exactly 1 doubled subject per day (1 pair = 2 periods)
+      let doubledCycleIdx = 0;
       for (const day of WEEKDAYS) {
-        for (let p = 1; p <= numPeriods; p++) {
-          const slotKey = `${day}_${p}`;
-          if (filledSlots.has(slotKey)) continue;
+        subjectDayCount.clear();
+        const order = Array.from({ length: numPeriods }, (_, i) => i + 1).sort(() => Math.random() - 0.5);
 
-          let placed = false;
-
-          // Tier 1: no teacher conflict + respects all day constraints
-          for (let ai = 0; ai < remainingAlloc.length && !placed; ai++) {
-            const item = remainingAlloc[ai];
-            const dayKey = `${item.subjectId}_${day}`;
-            if ((subjectDayCount.get(dayKey) || 0) >= (item.span === 2 ? 1 : 2)) continue;
-            if (item.span === 2 && doubledDays.has(day)) continue;
-
-            const teacherKey = `${item.teacherId}_${day}_${p}`;
-            if (usedTeacherSlots.has(teacherKey)) continue;
-
-            if (item.span === 2 && p + 1 <= numPeriods) {
-              const nextKey = `${day}_${p + 1}`;
-              const nextTeacherKey = `${item.teacherId}_${day}_${p + 1}`;
-              if (!filledSlots.has(nextKey) && !usedTeacherSlots.has(nextTeacherKey)) {
-                if (placeItem(item, day, p)) {
-                  subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                  remainingAlloc.splice(ai, 1);
-                  placed = true;
-                }
-              }
-            } else if (item.span === 1) {
-              if (placeItem(item, day, p)) {
-                subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                remainingAlloc.splice(ai, 1);
-                placed = true;
-              }
-            }
-          }
-
-          // Tier 2: allow teacher conflict, still respect day constraints
-          if (!placed) {
-            for (let ai = 0; ai < remainingAlloc.length && !placed; ai++) {
-              const item = remainingAlloc[ai];
-              const dayKey = `${item.subjectId}_${day}`;
-              if ((subjectDayCount.get(dayKey) || 0) >= (item.span === 2 ? 1 : 2)) continue;
-              if (item.span === 2 && doubledDays.has(day)) continue;
-
-              if (item.span === 2 && p + 1 <= numPeriods) {
-                if (!filledSlots.has(`${day}_${p + 1}`) && placeItem(item, day, p)) {
-                  subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                  remainingAlloc.splice(ai, 1);
-                  placed = true;
-                }
-              } else if (item.span === 1) {
-                if (placeItem(item, day, p)) {
-                  subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                  remainingAlloc.splice(ai, 1);
-                  placed = true;
-                }
-              }
-            }
-          }
-
-          // Tier 3: force place — skip all constraints
-          if (!placed && remainingAlloc.length > 0) {
-            const item = remainingAlloc[0];
-            const dayKey = `${item.subjectId}_${day}`;
-            if (item.span === 2 && p + 1 <= numPeriods) {
-              if (!filledSlots.has(`${day}_${p + 1}`) && placeItem(item, day, p)) {
-                subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                remainingAlloc.splice(0, 1);
-                placed = true;
-              }
-            } else if (item.span === 1) {
-              if (placeItem(item, day, p)) {
-                subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                remainingAlloc.splice(0, 1);
-                placed = true;
-              }
-            }
-            // If span=2 can't fit at this period (last period or next slot filled),
-            // try placing a span=1 item instead
-            if (!placed) {
-              const s1idx = remainingAlloc.findIndex(a => a.span === 1);
-              if (s1idx >= 0) {
-                const s1 = remainingAlloc[s1idx];
-                const s1Key = `${s1.subjectId}_${day}`;
-                if (placeItem(s1, day, p)) {
-                  subjectDayCount.set(s1Key, (subjectDayCount.get(s1Key) || 0) + 1);
-                  remainingAlloc.splice(s1idx, 1);
-                  placed = true;
-                }
+        // 1) Doubled subjects: 1 pair per day, cycle through list
+        if (doubledSubjects.length > 0) {
+          const ds = doubledSubjects[doubledCycleIdx % doubledSubjects.length];
+          doubledCycleIdx++;
+          for (const p of order) {
+            if (!filledSlots.has(`${day}_${p}`) && !filledSlots.has(`${day}_${p + 1}`) && p < numPeriods) {
+              if (doPlace(ds.subjectId, ds.subjectName, ds.teacherId, ds.teacherName, day, p, 2)) {
+                subjectDayCount.set(`${ds.subjectId}_${day}`, 1);
+                break;
               }
             }
           }
         }
-      }
 
-      // Post-process: fill any remaining empty slots with leftover items
-      if (remainingAlloc.length > 0) {
-        for (const day of WEEKDAYS) {
-          for (let p = 1; p <= numPeriods; p++) {
-            if (remainingAlloc.length === 0) break;
-            const slotKey = `${day}_${p}`;
-            if (filledSlots.has(slotKey)) continue;
+        // 2) All other subjects: fill remaining, max 2/day
+        const fillPool: Array<{
+          subjectId: string; subjectName: string; teacherId: string; teacherName: string
+        }> = [
+          ...regularSubjects.sort(() => Math.random() - 0.5),
+          ...noTeacherSubjects.sort(() => Math.random() - 0.5).map(s => ({ ...s, teacherId: '', teacherName: '' })),
+          ...unassignedSubjects.sort(() => Math.random() - 0.5),
+        ];
 
-            const item = remainingAlloc[0];
-            const dayKey = `${item.subjectId}_${day}`;
-            if (item.span === 2 && p + 1 <= numPeriods && !filledSlots.has(`${day}_${p + 1}`)) {
-              if (placeItem(item, day, p)) {
-                subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                remainingAlloc.splice(0, 1);
-              }
-            } else if (item.span === 1) {
-              if (placeItem(item, day, p)) {
-                subjectDayCount.set(dayKey, (subjectDayCount.get(dayKey) || 0) + 1);
-                remainingAlloc.splice(0, 1);
-              }
-            } else {
-              // span=2 can't fit here, try a span=1 item
-              const s1idx = remainingAlloc.findIndex(a => a.span === 1);
-              if (s1idx >= 0) {
-                const s1 = remainingAlloc[s1idx];
-                const s1Key = `${s1.subjectId}_${day}`;
-                if (placeItem(s1, day, p)) {
-                  subjectDayCount.set(s1Key, (subjectDayCount.get(s1Key) || 0) + 1);
-                  remainingAlloc.splice(s1idx, 1);
-                }
+        if (fillPool.length === 0) continue;
+
+        // Initial pass: each subject up to 2
+        for (const sub of fillPool) {
+          const key = `${sub.subjectId}_${day}`;
+          for (let a = 0; a < 2; a++) {
+            if ((subjectDayCount.get(key) || 0) >= 2) break;
+            for (const p of order) {
+              if (!filledSlots.has(`${day}_${p}`)) {
+                doPlace(sub.subjectId, sub.subjectName, sub.teacherId, sub.teacherName, day, p, 1);
+                subjectDayCount.set(key, (subjectDayCount.get(key) || 0) + 1);
+                break;
               }
             }
           }
+        }
+
+        // Fill remaining: cycle through pool, skip subjects at cap, stop when no progress
+        const capReached = () => fillPool.every(s => (subjectDayCount.get(`${s.subjectId}_${day}`) || 0) >= 2);
+        while (!capReached()) {
+          const before = filledSlots.size;
+          for (const sub of fillPool) {
+            const key = `${sub.subjectId}_${day}`;
+            if ((subjectDayCount.get(key) || 0) >= 2) continue;
+            if (filledSlots.size - before >= numPeriods) break;
+            for (const p of order) {
+              if (!filledSlots.has(`${day}_${p}`)) {
+                doPlace(sub.subjectId, sub.subjectName, sub.teacherId, sub.teacherName, day, p, 1);
+                subjectDayCount.set(key, (subjectDayCount.get(key) || 0) + 1);
+                break;
+              }
+            }
+          }
+          if (filledSlots.size === before) break;
         }
       }
 
       await deleteTimetableForClass(selectedClass);
       await saveTimetableEntries(entries);
       await loadTimetable();
-      showNotification('Timetable generated with subject settings', 'success');
+      showNotification('Timetable generated', 'success');
     } catch { showNotification('Failed to generate timetable', 'error'); }
     setLoading(false);
   };
@@ -542,107 +423,96 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     if (!selectedClass) { showNotification('Select a class first', 'error'); return; }
     try {
       const doc = new jsPDF();
-      const pw = 210, ML = 12, MR = pw - 12, CW = MR - ML;
-      const daysColW = CW / 6;
-      const timeColW = daysColW;
-      const dataColW = (CW - timeColW) / 5;
+      const pw = 210, ph = 297;
+      const c = getPDFColorsFromSettings(schoolSettings);
+      const s = schoolSettings;
 
-      // Title
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.setTextColor(2, 132, 199);
-      doc.text(`Timetable - ${selectedClass}`, pw / 2, 18, { align: 'center' });
+      // === Header band ===
+      doc.setFillColor(...c.primary);
+      doc.rect(0, 0, pw, 24, 'F');
 
-      // Subtitle (date)
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-      doc.text(`Generated: ${today}`, pw / 2, 25, { align: 'center' });
-
-      // Draw header row
-      const startY = 32;
-      const rowH = 10;
-      const headerBg: [number, number, number] = [241, 245, 249];
-      const borderColor: [number, number, number] = [203, 213, 225];
-      const textColor: [number, number, number] = [30, 41, 59];
-      const secColor: [number, number, number] = [100, 116, 139];
-
-      // Header cells
-      let x = ML;
-      doc.setFillColor(...headerBg);
-      doc.setDrawColor(...borderColor);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...secColor);
-
-      doc.rect(x, startY, timeColW, rowH, 'FD');
-      doc.text('Period', x + timeColW / 2, startY + 6.5, { align: 'center' });
-      x += timeColW;
-
-      for (const day of WEEKDAYS) {
-        doc.rect(x, startY, dataColW, rowH, 'FD');
-        doc.text(day.substring(0, 3), x + dataColW / 2, startY + 6.5, { align: 'center' });
-        x += dataColW;
+      let textX = 10;
+      if (s.schoolLogo) {
+        try {
+          const lw = Math.min(s.pdfLogoWidth ? s.pdfLogoWidth * 0.4 : 16, 18);
+          const lh = Math.min(s.pdfLogoHeight ? s.pdfLogoHeight * 0.4 : 16, 18);
+          doc.addImage(s.schoolLogo, 'PNG', 10, (24 - lh) / 2, lw, lh);
+          textX = 10 + lw + 4;
+        } catch (_) {}
       }
 
-      // Data rows
-      let y = startY + rowH;
-      const dataRowH = 14;
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text((s.schoolName || 'School OS').toUpperCase(), textX, 10);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(s.pdfBodySize || 10);
+      doc.text(`Timetable - ${selectedClass}`, textX, 17);
+      doc.setFontSize(7.5);
+      const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      doc.text(dateStr, pw - 10, 10, { align: 'right' });
+
+      // === Timetable table via autoTable ===
+      const headerRow = ['Period', ...WEEKDAYS.map(d => d.substring(0, 3))];
+      const bodyRows: string[][] = [];
 
       for (let p = 1; p <= numPeriods; p++) {
         const slot = periodSlots[p - 1];
-        x = ML;
-
-        // Period column
-        doc.setDrawColor(...borderColor);
-        doc.setFillColor(248, 250, 252);
-        doc.rect(x, y, timeColW, dataRowH, 'FD');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor(...secColor);
-        doc.text(`P${p}`, x + timeColW / 2, y + 5, { align: 'center' });
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.text(slot ? `${slot.startTime}-${slot.endTime}` : '', x + timeColW / 2, y + dataRowH - 3, { align: 'center' });
-        x += timeColW;
-
-        // Day columns
+        const periodLabel = slot ? `P${p}\n${slot.startTime}-${slot.endTime}` : `P${p}`;
+        const row: string[] = [periodLabel];
         for (const day of WEEKDAYS) {
           const entry = timetable.find(e => e.class === selectedClass && e.day === day && e.period === p);
-          const isOdd = (p % 2) === 1;
-          doc.setDrawColor(...borderColor);
-          doc.setFillColor(isOdd ? 255 : 252, isOdd ? 255 : 252, isOdd ? 255 : 252);
-          doc.rect(x, y, dataColW, dataRowH, 'FD');
-
           if (entry && entry.subjectId) {
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(7.5);
-            doc.setTextColor(...textColor);
-            const subjText = entry.subjectName.length > 14 ? entry.subjectName.substring(0, 13) + '.' : entry.subjectName;
-            doc.text(subjText, x + dataColW / 2, y + 5.5, { align: 'center' });
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(6.5);
-            doc.setTextColor(...secColor);
-            const tName = entry.teacherName.length > 16 ? entry.teacherName.substring(0, 15) + '.' : entry.teacherName;
-            doc.text(tName, x + dataColW / 2, y + dataRowH - 3, { align: 'center' });
+            row.push(`${entry.subjectName}\n${entry.teacherName}`);
+          } else {
+            row.push('');
           }
-
-          x += dataColW;
         }
-
-        y += dataRowH;
+        bodyRows.push(row);
       }
 
-      // Footer
-      doc.setFont('helvetica', 'normal');
+      autoTable(doc, {
+        startY: 30,
+        head: [headerRow],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8.5,
+          halign: 'center',
+        },
+        bodyStyles: {
+          textColor: [30, 41, 59],
+          fontSize: 7.5,
+          halign: 'center',
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252],
+        },
+        columnStyles: {
+          0: { cellWidth: 18, fontStyle: 'bold', fontSize: 8, textColor: [100, 116, 139] },
+        },
+        tableLineColor: [226, 232, 240],
+        tableLineWidth: 0.3,
+      });
+
+      // === Footer ===
+      const ft = s.pdfFooterText || '';
+      const finalY = (doc as any).lastAutoTable?.finalY || 260;
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(0.3);
+      doc.line(10, ph - 14, pw - 10, ph - 14);
       doc.setFontSize(7.5);
       doc.setTextColor(148, 163, 184);
-      doc.text('This is a computer-generated timetable.', pw / 2, y + 10, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.text(ft ? `${s.schoolName || 'School OS'}  |  ${ft}` : `${s.schoolName || 'School OS'}  |  ${dateStr}`, 10, ph - 9);
+      doc.text('Page 1 of 1', pw - 10, ph - 9, { align: 'right' });
 
       doc.save(`Timetable_${selectedClass.replace(/\s+/g, '_')}.pdf`);
       showNotification('Timetable PDF downloaded', 'success');
-    } catch { showNotification('Failed to generate PDF', 'error'); }
+    } catch (e) { console.error(e); showNotification('Failed to generate PDF', 'error'); }
   };
 
   const subTabs: { id: ScheduleTab; label: string; icon: React.FC<any> }[] = [
@@ -891,10 +761,10 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                       classSubjectMap[ts.subjectIds[i]] = ts.subjectNames[i] || sub?.name || ts.subjectIds[i];
                     }
                   }
-                  const assignedSubjects = subjects.filter(s => s.id && classSubjectIds.has(s.id));
+                  const assignedSubjects = subjects.filter(s => s.id);
 
                   if (assignedSubjects.length === 0) {
-                    return <div className="text-center py-12 text-gray-500"><p>No subjects assigned to this class yet. Go to "Assign to Teachers" first.</p></div>;
+                    return <div className="text-center py-12 text-gray-500"><p>No subjects found. Create subjects first.</p></div>;
                   }
 
                   return (
@@ -903,8 +773,8 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                         <thead className="bg-gray-800/50">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Subject</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Periods / Week</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Double Period</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Allow Same Day</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -912,27 +782,30 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                             const cfg = getConfigForSubject(s.id!);
                             return (
                               <tr key={s.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
-                                <td className="px-4 py-3 font-semibold text-sm">{classSubjectMap[s.id!]}</td>
-                                <td className="px-4 py-3">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={10}
-                                    value={cfg?.periodsPerWeek ?? 1}
-                                    onChange={e => updateSubjectConfig(s.id!, classSubjectMap[s.id!], 'periodsPerWeek', Math.max(0, parseInt(e.target.value) || 0))}
-                                    className="w-20 p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm text-center"
-                                  />
-                                </td>
+                                <td className="px-4 py-3 font-semibold text-sm">{classSubjectMap[s.id!] || s.name}</td>
                                 <td className="px-4 py-3">
                                   <label className="flex items-center gap-2 cursor-pointer">
                                     <input
                                       type="checkbox"
                                       checked={cfg?.doubled ?? false}
-                                      onChange={e => updateSubjectConfig(s.id!, classSubjectMap[s.id!], 'doubled', e.target.checked)}
+                                      onChange={e => updateSubjectConfig(s.id!, classSubjectMap[s.id!] || s.name, 'doubled', e.target.checked)}
                                       className="w-4 h-4 accent-cyan-500"
                                     />
                                     <span className={`text-xs font-semibold ${cfg?.doubled ? 'text-cyan-400' : 'text-gray-500'}`}>
                                       {cfg?.doubled ? 'Yes' : 'No'}
+                                    </span>
+                                  </label>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={cfg?.allowSameDay ?? false}
+                                      onChange={e => updateSubjectConfig(s.id!, classSubjectMap[s.id!] || s.name, 'allowSameDay', e.target.checked)}
+                                      className="w-4 h-4 accent-cyan-500"
+                                    />
+                                    <span className={`text-xs font-semibold ${cfg?.allowSameDay ? 'text-cyan-400' : 'text-gray-500'}`}>
+                                      {cfg?.allowSameDay ? 'Yes' : 'No'}
                                     </span>
                                   </label>
                                 </td>
@@ -942,10 +815,33 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                         </tbody>
                       </table>
                       <p className="text-xs text-gray-500 mt-4">
-                        Tip: "Periods / Week" controls how many times this subject appears in the timetable.
-                        "Double Period" means two consecutive periods for the same subject.
+                        "Double Period" = two consecutive periods (max 1 pair/day unless Allow Same Day).
+                        "Allow Same Day" lets a doubled subject repeat on the same day.
                         These settings are used when auto-generating the timetable.
                       </p>
+
+                      {/* No Teacher Subjects section */}
+                      <div className="mt-6 pt-4 border-t border-gray-800">
+                        <h4 className="text-sm font-semibold text-gray-300 mb-3">No Teacher Subjects</h4>
+                        <p className="text-xs text-gray-500 mb-3">Select subjects that fill remaining slots without a teacher.</p>
+                        <div className="flex flex-wrap gap-3">
+                          {subjects.filter(s => s.id).map(s => {
+                            const cfg = getConfigForSubject(s.id!);
+                            const isNoTeacher = cfg?.noTeacher === true;
+                            return (
+                              <label key={s.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition border ${isNoTeacher ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-gray-800/50 border-gray-700/30 hover:border-gray-600'}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={isNoTeacher}
+                                  onChange={e => updateSubjectConfig(s.id!, s.name || classSubjectMap[s.id!] || '', 'noTeacher', e.target.checked)}
+                                  className="w-4 h-4 accent-cyan-500"
+                                />
+                                <span className="text-sm font-medium">{classSubjectMap[s.id!] || s.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}

@@ -107,8 +107,9 @@ export interface SubjectConfig {
   class: string;
   subjectId: string;
   subjectName: string;
-  periodsPerWeek: number;
   doubled: boolean;
+  allowSameDay?: boolean;
+  noTeacher?: boolean;
 }
 
 export interface PeriodSlot {
