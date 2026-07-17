@@ -293,6 +293,28 @@ export const getTeacherSubjects = async () => {
 export const deleteTeacherSubject = async (id: string) =>
   deleteDoc(doc(db, 'teacherSubjects', id));
 
+// ----- Subject Configs (periods per week, doubled) -----
+export const saveSubjectConfig = async (config: any) => {
+  const q = query(collection(db, 'subjectConfigs'), where('class', '==', config.class), where('subjectId', '==', config.subjectId));
+  const snap = await getDocs(q);
+  const data = { class: config.class, subjectId: config.subjectId, subjectName: config.subjectName, periodsPerWeek: config.periodsPerWeek, doubled: config.doubled, updatedAt: Timestamp.now() };
+  if (snap.empty) {
+    const ref = await addDoc(collection(db, 'subjectConfigs'), { ...data, createdAt: Timestamp.now() });
+    return ref.id;
+  } else {
+    await updateDoc(doc(db, 'subjectConfigs', snap.docs[0].id), data);
+    return snap.docs[0].id;
+  }
+};
+
+export const getSubjectConfigs = async () => {
+  const snapshot = await getDocs(collection(db, 'subjectConfigs'));
+  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+};
+
+export const deleteSubjectConfig = async (id: string) =>
+  deleteDoc(doc(db, 'subjectConfigs', id));
+
 // ----- Timetable Entries -----
 export const saveTimetableEntries = async (entries: any[]) => {
   const batch = entries.map(e => addDoc(collection(db, 'timetable'), { ...e, createdAt: Timestamp.now() }));

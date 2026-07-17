@@ -102,6 +102,15 @@ export interface TimetableEntry {
   endTime: string;
 }
 
+export interface SubjectConfig {
+  id?: string;
+  class: string;
+  subjectId: string;
+  subjectName: string;
+  periodsPerWeek: number;
+  doubled: boolean;
+}
+
 export interface PeriodSlot {
   period: number;
   startTime: string;

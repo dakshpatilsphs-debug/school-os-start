@@ -21,7 +21,8 @@ import {
   addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit,
   addSubject, getSubjects, updateSubject, deleteSubject,
   saveTeacherSubjects, getTeacherSubjects, deleteTeacherSubject,
-  saveTimetableEntries, getTimetableEntries, deleteTimetableForClass, deleteTimetableEntry
+  saveTimetableEntries, getTimetableEntries, deleteTimetableForClass, deleteTimetableEntry,
+  saveSubjectConfig, getSubjectConfigs, deleteSubjectConfig
 } from './firebase';
 import { Student, Fee, Expense, Employee, Equipment, Attendance as Att, Holiday, Reminder, SchoolLogo } from './types';
 import { getColors as getPDFColors, getPDFColorsFromSettings, drawHeader as pdfHeader, drawFooter as pdfFooter, drawCoverPage as pdfCover, fmtDate as pdfDate, money as pdfMoney, getStatusColor as pdfStatusColor } from './PDFHelper';
@@ -126,6 +127,10 @@ const App: React.FC = () => {
   const [isCustomPackage, setIsCustomPackage] = useState(false);
   const [customPackageAmount, setCustomPackageAmount] = useState('');
   const [showAllStudents, setShowAllStudents] = useState(false);
+  const [showAllFees, setShowAllFees] = useState(false);
+  const [showAllFeesByStudent, setShowAllFeesByStudent] = useState(false);
+  const [showAllExpenses, setShowAllExpenses] = useState(false);
+  const [showAllEmployees, setShowAllEmployees] = useState(false);
 
   const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '' } as any);
   const [selectedStudentForFee, setSelectedStudentForFee] = useState('');
@@ -601,7 +606,7 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('schoolPackages', JSON.stringify(packages)); }, [packages]);
   useEffect(() => { localStorage.setItem('schoolDocumentOptions', JSON.stringify(documentOptions)); }, [documentOptions]);
   useEffect(() => { localStorage.setItem('schoolSettings', JSON.stringify(schoolSettings)); }, [schoolSettings]);
-  useEffect(() => { setShowAllStudents(false); }, [searchTerm]);
+  useEffect(() => { setShowAllStudents(false); setShowAllFees(false); setShowAllFeesByStudent(false); setShowAllExpenses(false); setShowAllEmployees(false); }, [searchTerm]);
 
   const getCurrentYearData = (data: any[]) => { const cy = new Date().getFullYear(); return data.filter(item => { const d = item.date || item.dueDate || item.paidDate; return !d || new Date(d).getFullYear() === cy; }); };
   const getEffectiveFeeStatus = (fee: Fee): 'paid' | 'pending' | 'overdue' => {
@@ -3462,7 +3467,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Type</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Description</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
-              <tbody>{fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).map(f => (
+              <tbody>{fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).slice(0, showAllFees ? undefined : 5).map(f => (
                   <tr key={f.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                     <td className="px-6 py-4 font-mono text-cyan-400">{f.autoId}</td><td className="px-6 py-4 font-semibold">{f.studentName}</td><td className="px-6 py-4 font-semibold">₹{f.amount.toLocaleString()}</td><td className="px-6 py-4">{f.type}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{f.description || '-'}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${getEffectiveFeeStatus(f) === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : getEffectiveFeeStatus(f) === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{getEffectiveFeeStatus(f)}</span></td>
@@ -3471,6 +3476,7 @@ const App: React.FC = () => {
                 </tr>
               ))}</tbody>
             </table></div></div>
+            {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFees ? 'Showing all' : `Showing 5 of ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).length}`}</p><button onClick={() => setShowAllFees(!showAllFees)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFees ? 'Show Less' : `View All ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).length}`}</button></div>}
           </div>
         )}
 
@@ -3493,7 +3499,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Class</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Package</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Balance</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Overdue</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Progress</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th></tr></thead>
-              <tbody>{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).map(s => {
+              <tbody>{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllFeesByStudent ? undefined : 5).map(s => {
                 const info = getStudentPaymentInfo(s);
                 const sc = info.paymentStatus === 'PAID' ? 'bg-emerald-500/20 text-emerald-400' : info.paymentStatus === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-400' : info.paymentStatus === 'OVERDUE' ? 'bg-red-500/20 text-red-400' : 'bg-red-500/20 text-red-400';
                 const pc = info.percentage >= 100 ? 'from-emerald-500 to-emerald-400' : info.percentage >= 50 ? 'from-cyan-500 to-blue-500' : info.percentage > 0 ? 'from-yellow-500 to-orange-500' : 'from-red-500 to-red-400';
@@ -3509,6 +3515,7 @@ const App: React.FC = () => {
                 </tr>);
               })}</tbody>
             </table></div></div>
+            {students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFeesByStudent ? 'Showing all' : `Showing 5 of ${students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllFeesByStudent(!showAllFeesByStudent)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFeesByStudent ? 'Show Less' : `View All ${students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
           </div>
         )}
 
@@ -3526,7 +3533,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
-              <tbody>{employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase())).map(e => {
+              <tbody>{employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllEmployees ? undefined : 5).map(e => {
                 const ei = getEmployeeExpenseInfo(e);
                 return (<tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4 font-semibold">{e.name}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{e.role}</span></td><td className="px-6 py-4 hidden xl:table-cell text-gray-400">{e.department || '—'}</td>
@@ -3537,6 +3544,7 @@ const App: React.FC = () => {
                 </tr>);
               })}</tbody>
             </table></div></div>
+            {employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllEmployees ? 'Showing all' : `Showing 5 of ${employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllEmployees(!showAllEmployees)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllEmployees ? 'Show Less' : `View All ${employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
             {employees.length === 0 && <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-12 text-center"><div className="text-6xl mb-4">💼</div><h3 className="text-xl font-bold mb-2">No Employees Found</h3><p className="text-gray-400 mb-6">Add your first employee</p>{!isReadOnly && <button onClick={openAddModal} className="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-3 rounded-xl font-semibold"><FiPlus size={18} />Add Employee</button>}</div>}
           </div>
         )}
@@ -3638,7 +3646,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Category</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid To</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
-              <tbody>{expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).map(e => (
+              <tbody>{expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllExpenses ? undefined : 5).map(e => (
                 <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{e.category}</span></td><td className="px-6 py-4 font-semibold">₹{e.amount.toLocaleString()}</td>
                   <td className="px-6 py-4">{e.paidTo}{e.employeeId && <span className="ml-2 text-xs text-cyan-400">🔗 Linked</span>}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.date}</td>
@@ -3648,6 +3656,7 @@ const App: React.FC = () => {
                 </tr>
               ))}</tbody>
             </table></div></div>
+            {expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllExpenses ? 'Showing all' : `Showing 5 of ${expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllExpenses(!showAllExpenses)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllExpenses ? 'Show Less' : `View All ${expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
           </div>
         )}
 
@@ -3668,6 +3677,9 @@ const App: React.FC = () => {
             getTimetableEntries={getTimetableEntries}
             deleteTimetableForClass={deleteTimetableForClass}
             deleteTimetableEntry={deleteTimetableEntry}
+            saveSubjectConfig={saveSubjectConfig}
+            getSubjectConfigs={getSubjectConfigs}
+            deleteSubjectConfig={deleteSubjectConfig}
           />
         )}
 
