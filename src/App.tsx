@@ -1530,8 +1530,13 @@ const App: React.FC = () => {
   const exportEmployeeReportPDF = () => {
     const months = selectedMonths;
     if (months.length === 0) { showNotification('Please select at least one month', 'error'); return; }
-    const activeEmps = employees.filter(e => e.status === 'ACTIVE');
-    if (activeEmps.length === 0) { showNotification('No active employees', 'error'); return; }
+    const reportEmps = employees.filter(e => e.status === 'ACTIVE' || (e.status === 'INACTIVE' && e.inactiveDate));
+    if (reportEmps.length === 0) { showNotification('No employees to report', 'error'); return; }
+
+    const isActiveInMonth = (emp: Employee, month: string) => {
+      if (emp.status === 'ACTIVE') return true;
+      return emp.inactiveDate ? emp.inactiveDate >= month + '-01' : false;
+    };
 
     const hList = holidays || [];
     const doc = new jsPDF();
@@ -1626,7 +1631,7 @@ const App: React.FC = () => {
 
     months.forEach((month) => {
       const monthName = new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      const monthEmps = activeEmps.map(emp => {
+      const monthEmps = reportEmps.filter(emp => isActiveInMonth(emp, month)).map(emp => {
         const att = buildAttendance(emp, month);
         grandTotal += att.earnedSalary;
         empMonthRows.push({ name: emp.name, role: emp.role || '-', month, workingDays: att.workingDays, presentDays: att.presentDays, autoCover: att.autoCover, clLeft: att.clLeft, earnedSalary: att.earnedSalary });
@@ -1786,7 +1791,7 @@ const App: React.FC = () => {
     }
 
     // ── Grand Total ──
-    if (activeEmps.length > 0 && months.length > 0) {
+    if (reportEmps.length > 0 && months.length > 0) {
       needPage(28);
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.3);
       doc.line(ML, y, MR, y);
@@ -1795,7 +1800,7 @@ const App: React.FC = () => {
       doc.text('GRAND TOTAL', pw / 2, y + 3, { align: 'center' });
       y += 9;
       doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
-      doc.text('Employees: ' + activeEmps.length + ' | Months: ' + months.length, ML, y + 3);
+      doc.text('Employees: ' + reportEmps.length + ' | Months: ' + months.length, ML, y + 3);
       doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
       doc.text('Rs ' + grandTotal.toLocaleString('en-IN'), MR, y + 3, { align: 'right' });
       y += 9;
@@ -1813,6 +1818,149 @@ const App: React.FC = () => {
 
     doc.save('Employees_Report_' + months.join('_') + '.pdf');
     showNotification('Employee report PDF exported successfully', 'success');
+  };
+
+  const exportEmployeeListPDF = () => {
+    const active = employees.filter(e => e.status === 'ACTIVE');
+    if (active.length === 0) { showNotification('No active employees', 'error'); return; }
+    const doc = new jsPDF();
+    const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const bodySize = schoolSettings.pdfBodySize || 10;
+    const sText = [30, 41, 59] as const;
+
+    // Header
+    pdfHeader(doc, 'Employee List', `Active: ${active.length}`, c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    // Table
+    const rows = active.map(e => [
+      e.name,
+      e.role || '-',
+      'Rs ' + Math.round((e.monthSalary?.[Object.keys(e.monthSalary || {})[0]] ?? e.salary) || 0).toLocaleString('en-IN'),
+      'Rs ' + Math.round((e.salary || 0)).toLocaleString('en-IN'),
+    ]);
+    rows.push(['', '', '', '']);
+    const totalSalary = active.reduce((s, e) => s + (e.salary || 0), 0);
+    rows.push(['TOTAL', '', '', 'Rs ' + Math.round(totalSalary).toLocaleString('en-IN')]);
+
+    autoTable(doc, {
+      startY: 30,
+      head: [['Name', 'Designation', 'Salary', 'Net Salary']],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { textColor: sText, fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 60 },
+        1: { cellWidth: 45 },
+        2: { cellWidth: 35, halign: 'right' },
+        3: { cellWidth: 35, halign: 'right' },
+      },
+      footStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 9 },
+    });
+
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save('Employee_List.pdf');
+    showNotification('Employee list PDF exported', 'success');
+  };
+
+  const exportFeesCollectionReportPDF = () => {
+    const activeStudents = students.filter(s => s.status === 'ACTIVE');
+    if (!activeStudents.length) { showNotification('No active students', 'error'); return; }
+
+    const doc = new jsPDF();
+    const pw = 210, CW = 160, ML = (pw - CW) / 2;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const sText = [30, 41, 59] as const;
+
+    // Group by class
+    const classes = [...new Set(activeStudents.map(s => s.class))].sort();
+    const classData = classes.map(cls => {
+      const cs = activeStudents.filter(s => s.class === cls);
+      let collected = 0;
+      cs.forEach(s => {
+        collected += getStudentPaymentInfo(s).totalPaid;
+      });
+      const target = cs.reduce((sum, s) => sum + (s.feeAmount || 0), 0);
+      const pending = target - collected;
+      return { cls, count: cs.length, target, collected, pending };
+    });
+
+    const grandTarget = classData.reduce((s, d) => s + d.target, 0);
+    const grandCollected = classData.reduce((s, d) => s + d.collected, 0);
+    const grandPending = classData.reduce((s, d) => s + d.pending, 0);
+
+    pdfHeader(doc, 'Fees Collection Report', '', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    autoTable(doc, {
+      startY: 30,
+      margin: { left: ML, right: ML },
+      head: [['Class', 'Students', 'Target (Rs)', 'Collected (Rs)', 'Pending (Rs)', 'Collection %']],
+      body: classData.map(d => [
+        d.cls,
+        String(d.count),
+        d.target.toLocaleString('en-IN'),
+        d.collected.toLocaleString('en-IN'),
+        d.pending.toLocaleString('en-IN'),
+        d.target > 0 ? ((d.collected / d.target) * 100).toFixed(1) + '%' : '0%',
+      ]),
+      foot: [[
+        'TOTAL',
+        String(activeStudents.length),
+        grandTarget.toLocaleString('en-IN'),
+        grandCollected.toLocaleString('en-IN'),
+        grandPending.toLocaleString('en-IN'),
+        grandTarget > 0 ? ((grandCollected / grandTarget) * 100).toFixed(1) + '%' : '0%',
+      ]],
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { textColor: sText, fontSize: 8, halign: 'center' },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      footStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 9, halign: 'center' },
+      columnStyles: {
+        0: { cellWidth: 20, halign: 'center' },
+        1: { cellWidth: 16, halign: 'center' },
+        2: { cellWidth: 33, halign: 'center' },
+        3: { cellWidth: 33, halign: 'center' },
+        4: { cellWidth: 33, halign: 'center' },
+        5: { cellWidth: 25, halign: 'center' },
+      },
+    });
+
+    const totalRevenue = fees.filter(f => f.status === 'paid').reduce((s, f) => s + f.amount, 0);
+    const totalExpenses = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0);
+    const balanceAmt = totalRevenue - totalExpenses;
+
+    doc.addPage();
+    pdfHeader(doc, 'Profit & Loss', '', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    autoTable(doc, {
+      startY: 30,
+      margin: { left: ML, right: ML },
+      head: [['Particulars', 'Amount (Rs)']],
+      body: [
+        ['Revenue', 'Rs ' + totalRevenue.toLocaleString('en-IN')],
+        ['Expenses', 'Rs ' + totalExpenses.toLocaleString('en-IN')],
+      ],
+      foot: [[
+        'Balance (Revenue - Expenses)',
+        'Rs ' + balanceAmt.toLocaleString('en-IN'),
+      ]],
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { textColor: sText, fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      footStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 100, halign: 'left' },
+        1: { cellWidth: 50, halign: 'right' },
+      },
+    });
+
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save('Fees_Collection_Report.pdf');
+    showNotification('Fees collection report PDF exported', 'success');
   };
 
   const exportFinancialReportPDF = () => {
@@ -3921,7 +4069,8 @@ const App: React.FC = () => {
               <button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Expenses Excel</button>
               <button onClick={() => exportToExcel(employees, 'Employees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Employees Excel</button>
               <button onClick={() => exportFinancialReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Report (PDF)</button>
-              <button onClick={() => exportFinancialReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Report (PDF)</button>
+              <button onClick={() => exportEmployeeListPDF()} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Employee List (PDF)</button>
+              <button onClick={() => exportFeesCollectionReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Fees Collection (PDF)</button>
             </div>
           </div>
         )}
