@@ -1932,11 +1932,8 @@ const App: React.FC = () => {
     const totalExpenses = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0);
     const balanceAmt = totalRevenue - totalExpenses;
 
-    doc.addPage();
-    pdfHeader(doc, 'Profit & Loss', '', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
-
     autoTable(doc, {
-      startY: 30,
+      startY: (doc as any).lastAutoTable.finalY + 10,
       margin: { left: ML, right: ML },
       head: [['Particulars', 'Amount (Rs)']],
       body: [
