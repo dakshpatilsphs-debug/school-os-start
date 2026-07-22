@@ -235,7 +235,7 @@ const App: React.FC = () => {
         },
         margin: { left: 10, right: 10, bottom: 20 },
         didParseCell: (data) => {
-          if (data.section === 'body' && data.column.index === 7) {
+          if (data.section === 'body' && data.column.index === 6) {
             data.cell.styles.textColor = pdfStatusColor(String(data.cell.raw));
             data.cell.styles.fontStyle = 'bold';
           }
@@ -1202,8 +1202,8 @@ const App: React.FC = () => {
       }
 
       // ── CSS-derived design tokens (from SalarySlip.css) ──
-      const sBorder = [226, 232, 240] as const;
-      const sText = [30, 41, 59] as const;
+    const sBorder: [number, number, number] = [226, 232, 240];
+    const sText: [number, number, number] = [30, 41, 59];
       const sTextSec = [100, 116, 139] as const;
       const sTextMuted = [148, 163, 184] as const;
       const sPrimary = [14, 165, 233] as const;
@@ -1827,7 +1827,7 @@ const App: React.FC = () => {
     const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
     const c = getPDFColorsFromSettings(schoolSettings);
     const bodySize = schoolSettings.pdfBodySize || 10;
-    const sText = [30, 41, 59] as const;
+    const sText: [number, number, number] = [30, 41, 59];
 
     // Header
     pdfHeader(doc, 'Employee List', `Active: ${active.length}`, c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
@@ -1869,55 +1869,53 @@ const App: React.FC = () => {
     if (!expenses.length) { showNotification('No expenses', 'error'); return; }
 
     const doc = new jsPDF();
-    const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
+    const pw = 210, ML = (pw - 190) / 2;
     const c = getPDFColorsFromSettings(schoolSettings);
-    const sText = [30, 41, 59] as const;
+    const sText: [number, number, number] = [30, 41, 59];
     const sorted = [...expenses].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const totalExpense = sorted.reduce((s, e) => s + e.amount, 0);
 
     const rows = sorted.map((e, i) => [
       'EXP-' + String(i + 1).padStart(3, '0'),
       e.category,
+      e.description || '-',
       'Rs ' + e.amount.toLocaleString('en-IN'),
       e.paidTo || '-',
       e.date,
       e.status,
     ]);
 
-    const totalExpense = sorted.reduce((s, e) => s + e.amount, 0);
-
     pdfHeader(doc, 'Expense Report', '', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
 
     autoTable(doc, {
       startY: 30,
       margin: { left: ML, right: ML },
-      head: [['ID', 'Category', 'Amount (Rs)', 'Paid To', 'Date', 'Status']],
+      head: [['#', 'Category', 'Description', 'Amount (Rs)', 'Paid To', 'Date', 'Status']],
       body: rows,
+      foot: [[
+        { content: 'TOTAL: Rs ' + totalExpense.toLocaleString('en-IN'), colSpan: 7, styles: { halign: 'right', fontStyle: 'bold', fontSize: 12 } },
+      ]],
       theme: 'grid',
-      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-      bodyStyles: { textColor: sText, fontSize: 8 },
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 8, halign: 'center' },
+      bodyStyles: { textColor: sText, fontSize: 7, halign: 'center' },
       alternateRowStyles: { fillColor: [248, 250, 252] },
+      footStyles: { fillColor: [239, 68, 68], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9, halign: 'center' },
       columnStyles: {
-        0: { cellWidth: 20, halign: 'center' },
-        1: { cellWidth: 35, halign: 'left' },
-        2: { cellWidth: 30, halign: 'right' },
-        3: { cellWidth: 30, halign: 'left' },
-        4: { cellWidth: 25, halign: 'center' },
-        5: { cellWidth: 20, halign: 'center' },
+        0: { cellWidth: 16, halign: 'center' },
+        1: { cellWidth: 28, halign: 'center' },
+        2: { cellWidth: 40, halign: 'left' },
+        3: { cellWidth: 28, halign: 'right' },
+        4: { cellWidth: 28, halign: 'center' },
+        5: { cellWidth: 26, halign: 'center' },
+        6: { cellWidth: 20, halign: 'center' },
       },
       didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 5) {
+        if (data.section === 'body' && data.column.index === 6) {
           data.cell.styles.textColor = pdfStatusColor(String(data.cell.raw));
           data.cell.styles.fontStyle = 'bold';
         }
       },
     });
-
-    const footerY = (doc as any).lastAutoTable.finalY + 6;
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(239, 68, 68);
-    doc.text('Total Expense: Rs ' + totalExpense.toLocaleString('en-IN'), pw / 2, footerY, { align: 'center' });
-    doc.setFont(undefined, 'normal');
 
     pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
     doc.save('Expense_Report.pdf');
@@ -1931,7 +1929,7 @@ const App: React.FC = () => {
     const doc = new jsPDF();
     const pw = 210, CW = 160, ML = (pw - CW) / 2;
     const c = getPDFColorsFromSettings(schoolSettings);
-    const sText = [30, 41, 59] as const;
+    const sText: [number, number, number] = [30, 41, 59];
 
     // Group by class
     const classes = [...new Set(activeStudents.map(s => s.class))].sort();
