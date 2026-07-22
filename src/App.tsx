@@ -1865,6 +1865,65 @@ const App: React.FC = () => {
     showNotification('Employee list PDF exported', 'success');
   };
 
+  const exportExpenseReportPDF = () => {
+    if (!expenses.length) { showNotification('No expenses', 'error'); return; }
+
+    const doc = new jsPDF();
+    const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const sText = [30, 41, 59] as const;
+    const sorted = [...expenses].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    const rows = sorted.map((e, i) => [
+      'EXP-' + String(i + 1).padStart(3, '0'),
+      e.category,
+      'Rs ' + e.amount.toLocaleString('en-IN'),
+      e.paidTo || '-',
+      e.date,
+      e.status,
+    ]);
+
+    const totalExpense = sorted.reduce((s, e) => s + e.amount, 0);
+
+    pdfHeader(doc, 'Expense Report', '', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    autoTable(doc, {
+      startY: 30,
+      margin: { left: ML, right: ML },
+      head: [['ID', 'Category', 'Amount (Rs)', 'Paid To', 'Date', 'Status']],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { textColor: sText, fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 20, halign: 'center' },
+        1: { cellWidth: 35, halign: 'left' },
+        2: { cellWidth: 30, halign: 'right' },
+        3: { cellWidth: 30, halign: 'left' },
+        4: { cellWidth: 25, halign: 'center' },
+        5: { cellWidth: 20, halign: 'center' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 5) {
+          data.cell.styles.textColor = pdfStatusColor(String(data.cell.raw));
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+
+    const footerY = (doc as any).lastAutoTable.finalY + 6;
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(239, 68, 68);
+    doc.text('Total Expense: Rs ' + totalExpense.toLocaleString('en-IN'), pw / 2, footerY, { align: 'center' });
+    doc.setFont(undefined, 'normal');
+
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save('Expense_Report.pdf');
+    showNotification('Expense report PDF exported', 'success');
+  };
+
   const exportFeesCollectionReportPDF = () => {
     const activeStudents = students.filter(s => s.status === 'ACTIVE');
     if (!activeStudents.length) { showNotification('No active students', 'error'); return; }
@@ -3787,7 +3846,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search description or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportToPDF(expenses, 'Expenses Report')} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button></div>
+              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportExpenseReportPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Category</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid To</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -3956,7 +4015,7 @@ const App: React.FC = () => {
               <div className="bg-[#1E1E1E] p-5 rounded-xl border border-gray-800">
                 <div className="flex items-center justify-between mb-2"><FiBriefcase className="text-orange-400" size={20} /><span className="text-xs text-gray-500">Monthly</span></div>
                 <p className="text-gray-400 text-xs">Salary Payout</p>
-                <p className="text-2xl font-bold text-orange-400">₹{employees.reduce((s, e) => s + (e.salary || 0), 0).toLocaleString()}</p>
+                <p className="text-2xl font-bold text-orange-400">₹{getEligibleSalaryEmployees().reduce((s, e) => s + (e.monthSalary?.[getMonthKey()] ?? (e.salary || 0)), 0).toLocaleString()}</p>
               </div>
             </div>
 
