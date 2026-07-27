@@ -76,6 +76,19 @@ npm run preview   # Preview production build
 - `schoolSettings` is stored in `localStorage` under key `'schoolSettings'`, synced via `useEffect` in `App.tsx:608`.
 - All PDF visual settings (colors, logo size, fonts, subtitles) are part of `schoolSettings`.
 
+## PDF Form Builder (`PDFFormPage.tsx`)
+
+- **Firebase Storage** used for original PDF templates only (admin upload).
+- Admin upload: pdfjs reads AcroForm fields first → if none found, AI (OpenRouter) reads PDF text to detect fields. PDF stored in Storage.
+- Public form (`PublicFormFiller`): renders fields, on submit saves submission to Firestore, then generates filled PDF client-side via **pdf-lib** (`PDFDocument.load` + `PDFTextField.setText`) and auto-downloads to device. No Storage upload for filled PDF.
+- If original PDF has no AcroForm fields, pdf-lib creates new text fields and places them on the PDF.
+- Admin submissions table: "View" button regenerates filled PDF on-demand from original template + form data (shown in iframe modal). "Download" button does the same but saves to device.
+- `fillOriginalPdf(templatePdfUrl, fields, formData, submitterName)` → returns `Blob`. Used by both public form and admin view/download.
+- `FormField` type: `{ id, label, type, required, options? }`.
+- `FormTemplate` type: `{ id?, autoId, title, description, pdfUrl, fields, createdAt }`.
+- `FormSubmission` type includes `filledPdfUrl?: string` (optional, no longer populated).
+- Public link: `?form=FORM_ID` URL param renders `PublicFormFiller` without nav/sidebar.
+
 ## Misc Gotchas
 
 - `tsconfig.json` has `strict: true` but `noUnusedLocals: false, noUnusedParameters: false` — relaxed.

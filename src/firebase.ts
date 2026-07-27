@@ -243,16 +243,6 @@ export const deleteHoliday = async (id: string) => {
   }
 };
 
-// ===== Reminder Functions =====
-export const addReminder = async (reminder: any) => addDoc(collection(db, 'reminders'), { ...reminder, createdAt: Timestamp.now() });
-export const getReminders = async () => {
-  const q = query(collection(db, 'reminders'), orderBy('createdAt', 'desc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-};
-export const updateReminder = async (id: string, data: any) => updateDoc(doc(db, 'reminders', id), data);
-export const deleteReminder = async (id: string) => deleteDoc(doc(db, 'reminders', id));
-
 // ===== Schedule / Timetable Functions =====
 // ----- Subjects -----
 export const addSubject = async (subject: any) =>
@@ -297,7 +287,7 @@ export const deleteTeacherSubject = async (id: string) =>
 export const saveSubjectConfig = async (config: any) => {
   const q = query(collection(db, 'subjectConfigs'), where('class', '==', config.class), where('subjectId', '==', config.subjectId));
   const snap = await getDocs(q);
-  const data = { class: config.class, subjectId: config.subjectId, subjectName: config.subjectName, doubled: config.doubled, allowSameDay: config.allowSameDay ?? false, noTeacher: config.noTeacher ?? false, updatedAt: Timestamp.now() };
+  const data = { class: config.class, subjectId: config.subjectId, subjectName: config.subjectName, doubled: config.doubled, allowSameDay: config.allowSameDay ?? false, noTeacher: config.noTeacher ?? false, periodsPerWeek: config.periodsPerWeek ?? 0, updatedAt: Timestamp.now() };
   if (snap.empty) {
     const ref = await addDoc(collection(db, 'subjectConfigs'), { ...data, createdAt: Timestamp.now() });
     return ref.id;
@@ -390,3 +380,4 @@ export const deleteEquipment = async (id: string) =>
     )
   );
 };
+

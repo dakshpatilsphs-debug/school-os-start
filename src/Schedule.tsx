@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FiBookOpen, FiUsers, FiCalendar, FiPlus, FiEdit2, FiTrash2, FiSave, FiX, FiRefreshCw, FiEye, FiGrid, FiClock, FiAlertTriangle, FiPrinter, FiDownload, FiSliders } from 'react-icons/fi';
+import { FiBookOpen, FiUsers, FiCalendar, FiPlus, FiEdit2, FiTrash2, FiSave, FiX, FiRefreshCw, FiEye, FiGrid, FiClock, FiAlertTriangle, FiPrinter, FiDownload, FiSliders, FiShield, FiZap, FiList } from 'react-icons/fi';
 import type { Subject, TeacherSubject, TimetableEntry, PeriodSlot, Employee, Student, SubjectConfig } from './types';
 import { WEEKDAYS, DEFAULT_PERIODS } from './types';
 import jsPDF from 'jspdf';
@@ -60,14 +60,28 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const [configDirty, setConfigDirty] = useState(false);
 
   // Timetable
-  const [viewMode, setViewMode] = useState<'grid' | 'teacher'>('grid');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [numPeriods, setNumPeriods] = useState(6);
-  const [periodSlots, setPeriodSlots] = useState<PeriodSlot[]>(DEFAULT_PERIODS.slice(0, 6));
+  const SCHEDULE_KEY = 'scheduleSettings';
+  const loadScheduleSettings = () => {
+    try { return JSON.parse(localStorage.getItem(SCHEDULE_KEY) || '{}'); } catch { return {}; }
+  };
+  const saved = loadScheduleSettings();
+  const [viewMode, setViewMode] = useState<'grid' | 'teacher'>(saved.viewMode || 'grid');
+  const [selectedClass, setSelectedClass] = useState(saved.selectedClass || '');
+  const [numPeriods, setNumPeriods] = useState(saved.numPeriods || 6);
+  const [periodSlots, setPeriodSlots] = useState<PeriodSlot[]>(saved.periodSlots || DEFAULT_PERIODS.slice(0, saved.numPeriods || 6));
   const [selectedCell, setSelectedCell] = useState<{ day: string; period: number } | null>(null);
   const [cellSubjectId, setCellSubjectId] = useState('');
   const [cellTeacherId, setCellTeacherId] = useState('');
   const [selectedTeacherView, setSelectedTeacherView] = useState('');
+  const [breakAfterPeriod, setBreakAfterPeriod] = useState(saved.breakAfterPeriod ?? 0);
+  const [maxDoubledPerDay, setMaxDoubledPerDay] = useState(saved.maxDoubledPerDay ?? 2);
+  const [clashReport, setClashReport] = useState<string[]>([]);
+  const [scheduleRules, setScheduleRules] = useState<string>(saved.scheduleRules || '');
+  const [showRulesModal, setShowRulesModal] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(SCHEDULE_KEY, JSON.stringify({ viewMode, selectedClass, numPeriods, periodSlots, breakAfterPeriod, maxDoubledPerDay, scheduleRules }));
+  }, [viewMode, selectedClass, numPeriods, periodSlots, breakAfterPeriod, maxDoubledPerDay, scheduleRules]);
 
   const activeEmployees = employees.filter(e => e.status === 'ACTIVE');
   const classes = [...new Set(students.map(s => s.class).filter(Boolean))].sort();
@@ -170,7 +184,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const getConfigForSubject = (subjectId: string): SubjectConfig | undefined =>
     subjectConfigs.find(c => c.class === configClass && c.subjectId === subjectId);
 
-  const updateSubjectConfig = (subjectId: string, subjectName: string, field: 'doubled' | 'allowSameDay' | 'noTeacher', value: boolean) => {
+  const updateSubjectConfig = (subjectId: string, subjectName: string, field: 'doubled' | 'allowSameDay' | 'noTeacher' | 'periodsPerWeek', value: boolean | number) => {
     setSubjectConfigs(prev => {
       const existing = prev.findIndex(c => c.class === configClass && c.subjectId === subjectId);
       const updated = [...prev];
@@ -196,6 +210,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
           doubled: cfg.doubled ?? false,
           allowSameDay: cfg.allowSameDay ?? false,
           noTeacher: cfg.noTeacher ?? false,
+          periodsPerWeek: cfg.periodsPerWeek ?? 0,
         });
       }
       await loadSubjectConfigs();
@@ -226,6 +241,144 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     return conflicts;
   }, [timetable]);
 
+  const getAllClashes = useCallback((): string[] => {
+    const clashes: string[] = [];
+    const classes = [...new Set(timetable.map(e => e.class))];
+    for (const cls of classes) {
+      const entries = timetable.filter(e => e.class === cls);
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          const a = entries[i], b = entries[j];
+          if (a.day === b.day && a.period === b.period) {
+            if (a.teacherId && b.teacherId && a.teacherId === b.teacherId) {
+              clashes.push(`${cls} ${a.day} P${a.period}: Teacher "${a.teacherName}" in two classes`);
+            }
+            if (a.subjectId === b.subjectId && a.subjectId) {
+              clashes.push(`${cls} ${a.day} P${a.period}: Subject "${a.subjectName}" duplicated`);
+            }
+          }
+        }
+      }
+    }
+    return clashes;
+  }, [timetable]);
+
+    const handleCheckClashes = () => {
+    const c = getAllClashes();
+    const emptySlots: string[] = [];
+    for (const day of WEEKDAYS) {
+      for (let p = 1; p <= numPeriods; p++) {
+        if (!timetable.find(e => e.class === selectedClass && e.day === day && e.period === p && e.subjectId)) {
+          emptySlots.push(`${day} P${p}`);
+        }
+      }
+    }
+    const report = [...c, ...emptySlots.map(s => `${selectedClass}: Empty slot — ${s}`)];
+    setClashReport(report);
+    if (report.length === 0) showNotification('Timetable is perfect — no clashes, no empty slots', 'success');
+    else showNotification(`Found ${c.length} clash(es) and ${emptySlots.length} empty slot(s)`, 'error');
+  };
+
+  const handleFixClashesAI = async () => {
+    const OPENROUTER_KEY = (import.meta as any).env?.VITE_OPENROUTER_KEY || '';
+    const OPENROUTER_MODEL = (import.meta as any).env?.VITE_OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free';
+    if (!OPENROUTER_KEY) { showNotification('AI key not configured', 'error'); return; }
+    const clashes = getAllClashes();
+    const emptySlots: string[] = [];
+    const classes = [...new Set(timetable.map(e => e.class))];
+    const allClasses = selectedClass ? [selectedClass] : classes;
+    for (const cls of allClasses) {
+      for (const day of WEEKDAYS) {
+        for (let p = 1; p <= numPeriods; p++) {
+          if (!timetable.find(e => e.class === cls && e.day === day && e.period === p && e.subjectId)) {
+            emptySlots.push(`${cls} ${day} P${p}`);
+          }
+        }
+      }
+    }
+    if (clashes.length === 0 && emptySlots.length === 0) { showNotification('No clashes and no empty slots', 'success'); return; }
+    setLoading(true);
+    try {
+      const currentTimetable = timetable.map(e => ({
+        class: e.class, day: e.day, period: e.period,
+        subjectId: e.subjectId, subjectName: e.subjectName,
+        teacherId: e.teacherId, teacherName: e.teacherName,
+      }));
+
+      // Build full grid showing ALL slots (filled or EMPTY)
+      const fullGrid: Array<{ class: string; day: string; period: number; subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
+      for (const cls of allClasses) {
+        for (const day of WEEKDAYS) {
+          for (let p = 1; p <= numPeriods; p++) {
+            const entry = currentTimetable.find(e => e.class === cls && e.day === day && e.period === p);
+            if (entry) {
+              fullGrid.push(entry);
+            } else {
+              fullGrid.push({ class: cls, day, period: p, subjectId: 'EMPTY', subjectName: 'EMPTY', teacherId: '', teacherName: '' });
+            }
+          }
+        }
+      }
+
+      const teacherList = activeEmployees.map(e => ({ id: e.autoId, name: e.name, role: e.role }));
+      const subjectList = subjects.map(s => ({ id: s.id || '', name: s.name }));
+      const teacherSubjectPairs = teacherSubjects.filter(ts => allClasses.includes(ts.class)).map(ts => ({
+        class: ts.class, teacherId: ts.teacherId, teacherName: ts.teacherName,
+        subjectIds: ts.subjectIds, subjectNames: ts.subjectNames,
+      }));
+
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENROUTER_KEY}` },
+        body: JSON.stringify({
+          model: OPENROUTER_MODEL,
+          messages: [
+            { role: 'system', content: `You are a timetable resolver. Fix clashes AND fill empty slots.
+
+Return ONLY a JSON array of changes. Each change: { "class": string, "day": string, "period": number, "newSubjectId": string, "newSubjectName": string, "newTeacherId": string, "newTeacherName": string }
+
+Rules:
+- Fix teacher conflicts (same teacher in two classes same time)
+- Fill ALL empty slots with appropriate subjects and teachers
+- A teacher can only teach one class at a time per period
+- Use the teacher-subject assignments to know which teacher teaches which subject
+- For empty slots: pick a subject+teacher pair that is not already occupied at that time
+- If a subject has no assigned teacher, use empty string "" for teacherId and teacherName
+- Ensure every class has every period filled (no empty cells)
+- Return changes for both fixes and fills
+${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` },
+            { role: 'user', content: `Clashes:\n${clashes.length > 0 ? clashes.join('\n') : 'None'}\n\nEmpty Slots to fill:\n${emptySlots.length > 0 ? emptySlots.join('\n') : 'None'}\n\nFULL TIMETABLE GRID (every cell — slots marked "EMPTY" must be filled):\n${JSON.stringify(fullGrid)}\n\nTeacher-Subject Assignments:\n${JSON.stringify(teacherSubjectPairs)}\n\nTeachers:\n${teacherList.map(t => `${t.id}: ${t.name} (${t.role})`).join('\n')}\n\nSubjects:\n${subjectList.map(s => `${s.id}: ${s.name}`).join('\n')}\n\nMax periods per day: ${numPeriods}\nBreak after period: ${breakAfterPeriod || 'None'}\n\nIMPORTANT: Every slot with subjectId="EMPTY" MUST have a change entry in your response. Do NOT skip any EMPTY slot.` }
+          ],
+          temperature: 0.1,
+          max_tokens: 8000,
+        }),
+      });
+      if (!res.ok) throw new Error('AI request failed');
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || '[]';
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error('Invalid AI response');
+      const fixes = JSON.parse(jsonMatch[0]) as Array<{ class: string; day: string; period: number; newSubjectId: string; newSubjectName: string; newTeacherId: string; newTeacherName: string }>;
+
+      for (const fix of fixes) {
+        const existing = timetable.find(e => e.class === fix.class && e.day === fix.day && e.period === fix.period);
+        if (existing?.id) await deleteTimetableEntry(existing.id);
+        const slot = periodSlots[fix.period - 1];
+        await saveTimetableEntries([{
+          class: fix.class, day: fix.day, period: fix.period,
+          subjectId: fix.newSubjectId, subjectName: fix.newSubjectName,
+          teacherId: fix.newTeacherId, teacherName: fix.newTeacherName,
+          startTime: slot?.startTime || '', endTime: slot?.endTime || '',
+        }]);
+      }
+      await loadTimetable();
+      const remaining = getAllClashes();
+      setClashReport(remaining);
+      showNotification(`AI applied ${fixes.length} change(s) — ${remaining.length} clash(es) remaining`, remaining.length === 0 ? 'success' : 'error');
+    } catch { showNotification('AI fix failed', 'error'); }
+    setLoading(false);
+  };
+
   const updatePeriodSlots = (n: number) => {
     setNumPeriods(n);
     setPeriodSlots(DEFAULT_PERIODS.slice(0, n));
@@ -239,7 +392,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     if (!selectedClass) { showNotification('Select a class', 'error'); return; }
     setLoading(true);
     try {
-      // Collect unique subject-teacher pairs (deduplicated by subjectId)
       const pairMap = new Map<string, { subjectId: string; subjectName: string; teacherId: string; teacherName: string }>();
       for (const ts of teacherSubjects) {
         if (ts.class !== selectedClass) continue;
@@ -254,109 +406,133 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
 
       const filledSlots = new Set<string>();
       const entries: any[] = [];
+      const subjectWeekCount = new Map<string, number>();
       const subjectDayCount = new Map<string, number>();
 
+      const breakSlot = breakAfterPeriod > 0 ? breakAfterPeriod : -1;
+
       const doPlace = (subjectId: string, subjectName: string, teacherId: string, teacherName: string, day: string, p: number, span: number) => {
-        const slotKey = `${day}_${p}`;
+        if (span === 2 && breakSlot > 0 && p === breakSlot) return false;
         if (span === 2) {
           const nextKey = `${day}_${p + 1}`;
-          if (filledSlots.has(nextKey)) return false;
+          if (filledSlots.has(nextKey) || p + 1 > numPeriods) return false;
           const slot = periodSlots[p - 1];
           const nextSlot = periodSlots[p];
           entries.push({ class: selectedClass, day, period: p, subjectId, subjectName, teacherId, teacherName, startTime: slot.startTime, endTime: slot.endTime });
           entries.push({ class: selectedClass, day, period: p + 1, subjectId, subjectName, teacherId, teacherName, startTime: nextSlot.startTime, endTime: nextSlot.endTime });
-          filledSlots.add(slotKey);
+          filledSlots.add(`${day}_${p}`);
           filledSlots.add(nextKey);
           return true;
         }
+        if (filledSlots.has(`${day}_${p}`)) return false;
         const slot = periodSlots[p - 1];
         entries.push({ class: selectedClass, day, period: p, subjectId, subjectName, teacherId, teacherName, startTime: slot.startTime, endTime: slot.endTime });
-        filledSlots.add(slotKey);
+        filledSlots.add(`${day}_${p}`);
         return true;
       };
 
-      // Categorize subjects
-      const doubledSubjects: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
-      const regularSubjects: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
+      // Classify subjects
+      const doubledSubjects: typeof pairs = [];
+      const regularSubjects: typeof pairs = [];
       const noTeacherSubjects: Array<{ subjectId: string; subjectName: string }> = [];
-      const unassignedSubjects: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [];
 
       for (const pair of pairs) {
         const cfg = subjectConfigs.find(c => c.class === selectedClass && c.subjectId === pair.subjectId);
-        if (cfg?.noTeacher) {
-          noTeacherSubjects.push({ subjectId: pair.subjectId, subjectName: pair.subjectName });
-        } else if (cfg?.doubled) {
-          doubledSubjects.push({ ...pair });
-        } else if (cfg) {
-          regularSubjects.push(pair);
-        } else {
-          unassignedSubjects.push(pair);
+        if (cfg?.noTeacher) noTeacherSubjects.push({ subjectId: pair.subjectId, subjectName: pair.subjectName });
+        else if (cfg?.doubled) doubledSubjects.push({ ...pair });
+        else regularSubjects.push({ ...pair });
+      }
+
+      // Available periods
+      const getAvailablePeriods = (day: string) => {
+        const periods: number[] = [];
+        for (let p = 1; p <= numPeriods; p++) {
+          if (!filledSlots.has(`${day}_${p}`)) periods.push(p);
+        }
+        return periods.sort(() => Math.random() - 0.5);
+      };
+
+      // After-break periods for doubled lectures
+      const getAfterBreakPeriods = (day: string) => {
+        const periods: number[] = [];
+        for (let p = (breakSlot > 0 ? breakSlot + 1 : 1); p <= numPeriods; p++) {
+          if (!filledSlots.has(`${day}_${p}`)) periods.push(p);
+        }
+        return periods.sort(() => Math.random() - 0.5);
+      };
+
+      // Step 1: Place doubled lectures (max maxDoubledPerDay different doubled subjects per day, after break)
+      const doubledCycle = [...doubledSubjects].sort(() => Math.random() - 0.5);
+      for (const day of WEEKDAYS) {
+        let placed = 0;
+        for (const ds of doubledCycle) {
+          if (placed >= maxDoubledPerDay) break;
+          const weekKey = ds.subjectId;
+          const weekCount = subjectWeekCount.get(weekKey) || 0;
+          const cfg = subjectConfigs.find(c => c.class === selectedClass && c.subjectId === ds.subjectId);
+          const maxPerWeek = cfg?.periodsPerWeek && cfg.periodsPerWeek > 0 ? cfg.periodsPerWeek : numPeriods * WEEKDAYS.length;
+          if (weekCount >= maxPerWeek) continue;
+
+          const afterBreak = getAfterBreakPeriods(day);
+          for (let i = 0; i < afterBreak.length - 1; i++) {
+            const p = afterBreak[i];
+            if (doPlace(ds.subjectId, ds.subjectName, ds.teacherId, ds.teacherName, day, p, 2)) {
+              subjectWeekCount.set(weekKey, weekCount + 2);
+              subjectDayCount.set(`${ds.subjectId}_${day}`, (subjectDayCount.get(`${ds.subjectId}_${day}`) || 0) + 2);
+              placed++;
+              break;
+            }
+          }
         }
       }
 
-      // Place each day — exactly 1 doubled subject per day (1 pair = 2 periods)
-      let doubledCycleIdx = 0;
+      // Step 2: Place regular + noTeacher subjects, respecting periodsPerWeek
+      const fillPool: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string; isNoTeacher?: boolean }> = [
+        ...regularSubjects.map(s => ({ ...s })),
+        ...noTeacherSubjects.map(s => ({ ...s, teacherId: '', teacherName: '', isNoTeacher: true })),
+      ].sort(() => Math.random() - 0.5);
+
       for (const day of WEEKDAYS) {
-        subjectDayCount.clear();
-        const order = Array.from({ length: numPeriods }, (_, i) => i + 1).sort(() => Math.random() - 0.5);
-
-        // 1) Doubled subjects: 1 pair per day, cycle through list
-        if (doubledSubjects.length > 0) {
-          const ds = doubledSubjects[doubledCycleIdx % doubledSubjects.length];
-          doubledCycleIdx++;
-          for (const p of order) {
-            if (!filledSlots.has(`${day}_${p}`) && !filledSlots.has(`${day}_${p + 1}`) && p < numPeriods) {
-              if (doPlace(ds.subjectId, ds.subjectName, ds.teacherId, ds.teacherName, day, p, 2)) {
-                subjectDayCount.set(`${ds.subjectId}_${day}`, 1);
-                break;
-              }
-            }
-          }
-        }
-
-        // 2) All other subjects: fill remaining, max 2/day
-        const fillPool: Array<{
-          subjectId: string; subjectName: string; teacherId: string; teacherName: string
-        }> = [
-          ...regularSubjects.sort(() => Math.random() - 0.5),
-          ...noTeacherSubjects.sort(() => Math.random() - 0.5).map(s => ({ ...s, teacherId: '', teacherName: '' })),
-          ...unassignedSubjects.sort(() => Math.random() - 0.5),
-        ];
-
-        if (fillPool.length === 0) continue;
-
-        // Initial pass: each subject up to 2
-        for (const sub of fillPool) {
-          const key = `${sub.subjectId}_${day}`;
-          for (let a = 0; a < 2; a++) {
-            if ((subjectDayCount.get(key) || 0) >= 2) break;
-            for (const p of order) {
-              if (!filledSlots.has(`${day}_${p}`)) {
-                doPlace(sub.subjectId, sub.subjectName, sub.teacherId, sub.teacherName, day, p, 1);
-                subjectDayCount.set(key, (subjectDayCount.get(key) || 0) + 1);
-                break;
-              }
-            }
-          }
-        }
-
-        // Fill remaining: cycle through pool, skip subjects at cap, stop when no progress
-        const capReached = () => fillPool.every(s => (subjectDayCount.get(`${s.subjectId}_${day}`) || 0) >= 2);
-        while (!capReached()) {
-          const before = filledSlots.size;
+        const available = getAvailablePeriods(day);
+        for (const p of available) {
+          if (filledSlots.has(`${day}_${p}`)) continue;
+          let placed = false;
           for (const sub of fillPool) {
-            const key = `${sub.subjectId}_${day}`;
-            if ((subjectDayCount.get(key) || 0) >= 2) continue;
-            if (filledSlots.size - before >= numPeriods) break;
-            for (const p of order) {
-              if (!filledSlots.has(`${day}_${p}`)) {
-                doPlace(sub.subjectId, sub.subjectName, sub.teacherId, sub.teacherName, day, p, 1);
-                subjectDayCount.set(key, (subjectDayCount.get(key) || 0) + 1);
-                break;
-              }
+            const weekKey = sub.subjectId;
+            const weekCount = subjectWeekCount.get(weekKey) || 0;
+            const dayCount = subjectDayCount.get(`${sub.subjectId}_${day}`) || 0;
+            const cfg = subjectConfigs.find(c => c.class === selectedClass && c.subjectId === sub.subjectId);
+            const maxPerWeek = cfg?.periodsPerWeek && cfg.periodsPerWeek > 0 ? cfg.periodsPerWeek : numPeriods * WEEKDAYS.length;
+            if (weekCount >= maxPerWeek) continue;
+            if (dayCount >= 2) continue;
+
+            if (doPlace(sub.subjectId, sub.subjectName, sub.teacherId, sub.teacherName, day, p, 1)) {
+              subjectWeekCount.set(weekKey, weekCount + 1);
+              subjectDayCount.set(`${sub.subjectId}_${day}`, dayCount + 1);
+              placed = true;
+              break;
             }
           }
-          if (filledSlots.size === before) break;
+        }
+      }
+
+      // Step 3: Force-fill remaining empty slots — cycle through all subjects (no cap)
+      const allPool: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }> = [
+        ...noTeacherSubjects.map(s => ({ ...s, teacherId: '', teacherName: '' })),
+        ...regularSubjects.map(s => ({ ...s })),
+        ...doubledSubjects.map(s => ({ ...s })),
+      ].sort(() => Math.random() - 0.5);
+
+      for (const day of WEEKDAYS) {
+        for (let p = 1; p <= numPeriods; p++) {
+          if (filledSlots.has(`${day}_${p}`)) continue;
+          for (const sub of allPool) {
+            if (doPlace(sub.subjectId, sub.subjectName, sub.teacherId, sub.teacherName, day, p, 1)) {
+              subjectWeekCount.set(sub.subjectId, (subjectWeekCount.get(sub.subjectId) || 0) + 1);
+              subjectDayCount.set(`${sub.subjectId}_${day}`, (subjectDayCount.get(`${sub.subjectId}_${day}`) || 0) + 1);
+              break;
+            }
+          }
         }
       }
 
@@ -457,6 +633,9 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
       const bodyRows: string[][] = [];
 
       for (let p = 1; p <= numPeriods; p++) {
+        if (breakAfterPeriod > 0 && p === breakAfterPeriod + 1) {
+          bodyRows.push(['--- BREAK ---', ...WEEKDAYS.map(() => '')]);
+        }
         const slot = periodSlots[p - 1];
         const periodLabel = slot ? `P${p}\n${slot.startTime}-${slot.endTime}` : `P${p}`;
         const row: string[] = [periodLabel];
@@ -773,8 +952,8 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                         <thead className="bg-gray-800/50">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Subject</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Double Period</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Allow Same Day</th>
+                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400">Periods / Week</th>
+                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400">Double Period</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -783,8 +962,20 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                             return (
                               <tr key={s.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                                 <td className="px-4 py-3 font-semibold text-sm">{classSubjectMap[s.id!] || s.name}</td>
-                                <td className="px-4 py-3">
-                                  <label className="flex items-center gap-2 cursor-pointer">
+                                <td className="px-4 py-3 text-center">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={numPeriods * WEEKDAYS.length}
+                                    value={cfg?.periodsPerWeek ?? 0}
+                                    onChange={e => updateSubjectConfig(s.id!, classSubjectMap[s.id!] || s.name, 'periodsPerWeek', parseInt(e.target.value) || 0)}
+                                    className="w-20 p-1.5 bg-gray-800 border border-gray-700 rounded text-center text-sm text-white"
+                                    title="0 = auto (fill remaining slots)"
+                                  />
+                                  <p className="text-[10px] text-gray-500 mt-0.5">0 = auto</p>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <label className="flex items-center gap-2 cursor-pointer justify-center">
                                     <input
                                       type="checkbox"
                                       checked={cfg?.doubled ?? false}
@@ -796,28 +987,14 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                                     </span>
                                   </label>
                                 </td>
-                                <td className="px-4 py-3">
-                                  <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={cfg?.allowSameDay ?? false}
-                                      onChange={e => updateSubjectConfig(s.id!, classSubjectMap[s.id!] || s.name, 'allowSameDay', e.target.checked)}
-                                      className="w-4 h-4 accent-cyan-500"
-                                    />
-                                    <span className={`text-xs font-semibold ${cfg?.allowSameDay ? 'text-cyan-400' : 'text-gray-500'}`}>
-                                      {cfg?.allowSameDay ? 'Yes' : 'No'}
-                                    </span>
-                                  </label>
-                                </td>
                               </tr>
                             );
                           })}
                         </tbody>
                       </table>
                       <p className="text-xs text-gray-500 mt-4">
-                        "Double Period" = two consecutive periods (max 1 pair/day unless Allow Same Day).
-                        "Allow Same Day" lets a doubled subject repeat on the same day.
-                        These settings are used when auto-generating the timetable.
+                        "Periods / Week" = how many times this subject appears per week (0 = auto-fill remaining).
+                        "Double Period" = two consecutive periods, placed after the break (max {maxDoubledPerDay}/day).
                       </p>
 
                       {/* No Teacher Subjects section */}
@@ -874,7 +1051,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
             {viewMode === 'grid' && (
               <>
                 {/* Controls */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
                   <div>
                     <label className="text-xs text-gray-400 block mb-1">Class</label>
                     <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm">
@@ -888,23 +1065,57 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                       {[4, 5, 6, 7, 8].map(n => <option key={n} value={n}>{n} periods</option>)}
                     </select>
                   </div>
-                  <div className="md:col-span-2 flex items-end gap-2">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Break After Period</label>
+                    <select value={breakAfterPeriod} onChange={e => setBreakAfterPeriod(parseInt(e.target.value))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm">
+                      <option value={0}>No Break</option>
+                      {Array.from({ length: numPeriods - 1 }, (_, i) => i + 1).map(n => <option key={n} value={n}>After P{n}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Max Doubled / Day</label>
+                    <select value={maxDoubledPerDay} onChange={e => setMaxDoubledPerDay(parseInt(e.target.value))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm">
+                      {[0, 1, 2, 3, 4].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-end gap-2">
                     <button onClick={handleAutoGenerate} disabled={loading} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white px-5 py-3 rounded-xl font-semibold transition shadow-lg shadow-purple-500/20 disabled:opacity-50">
                       <FiRefreshCw size={16} className={loading ? 'animate-spin' : ''} /> {loading ? 'Generating...' : 'Auto Generate'}
                     </button>
-                    <button onClick={clearTimetable} className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
-                      <FiTrash2 size={16} />
-                    </button>
-                    {selectedClass && <>
-                      <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
-                        <FiDownload size={16} /> PDF
-                      </button>
-                      <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
-                        <FiPrinter size={16} /> Print
-                      </button>
-                    </>}
                   </div>
                 </div>
+
+                <div className="flex flex-wrap gap-2 mb-6">
+                  <button onClick={clearTimetable} className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                    <FiTrash2 size={16} />
+                  </button>
+                  {selectedClass && <>
+                    <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                      <FiDownload size={16} /> PDF
+                    </button>
+                    <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                      <FiPrinter size={16} /> Print
+                    </button>
+                  </>}
+                  <button onClick={handleCheckClashes} disabled={!selectedClass} className="flex items-center gap-2 px-4 py-3 bg-amber-500/10 border border-amber-500/50 text-amber-400 hover:bg-amber-500/20 rounded-xl text-sm font-semibold transition disabled:opacity-50">
+                    <FiShield size={16} /> Check Clashes & Empty
+                  </button>
+                  <button onClick={handleFixClashesAI} disabled={loading || !selectedClass} className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white rounded-xl text-sm font-semibold transition shadow-lg shadow-amber-500/20 disabled:opacity-50">
+                    <FiZap size={16} /> {loading ? 'Fixing...' : 'AI Fix All'}
+                  </button>
+                  <button onClick={() => setShowRulesModal(true)} className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition border ${scheduleRules.trim() ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
+                    <FiList size={16} /> Schedule Rules {scheduleRules.trim() ? '(Active)' : ''}
+                  </button>
+                </div>
+
+                {clashReport.length > 0 && (
+                  <div className="bg-red-950/50 border border-red-500/30 rounded-xl p-4 mb-6">
+                    <p className="text-sm font-bold text-red-400 mb-2 flex items-center gap-2"><FiAlertTriangle size={14} /> Clash Report ({clashReport.length})</p>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {clashReport.map((c, i) => <p key={i} className="text-xs text-red-300">{c}</p>)}
+                    </div>
+                  </div>
+                )}
 
                 {/* Period Times Editor */}
                 <div className="bg-gray-800/30 rounded-xl border border-gray-700 p-4 mb-6">
@@ -937,7 +1148,15 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                         {Array.from({ length: numPeriods }, (_, pi) => pi + 1).map(p => {
                           const conflicts = getTeacherConflicts(selectedClass);
                           return (
-                            <tr key={p}>
+                            <React.Fragment key={p}>
+                              {breakAfterPeriod > 0 && p === breakAfterPeriod + 1 && (
+                                <tr>
+                                  <td colSpan={WEEKDAYS.length + 1} className="p-1 bg-amber-500/10 border border-amber-500/20">
+                                    <div className="text-center text-[10px] font-bold text-amber-400 tracking-widest">BREAK</div>
+                                  </td>
+                                </tr>
+                              )}
+                              <tr>
                               <td className="p-2 text-xs text-center text-gray-500 font-mono border border-gray-800 bg-gray-800/30">
                                 <div className="text-cyan-400 font-bold">{p}</div>
                                 <div className="text-[10px] text-gray-500">{periodSlots[p - 1]?.startTime}-{periodSlots[p - 1]?.endTime}</div>
@@ -987,6 +1206,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                                 );
                               })}
                             </tr>
+                            </React.Fragment>
                           );
                         })}
                       </tbody>
@@ -1065,6 +1285,36 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== SCHEDULE RULES MODAL ===== */}
+      {showRulesModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setShowRulesModal(false)}>
+          <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2"><FiList className="text-cyan-400" /> Schedule Rules for AI</h3>
+                <p className="text-xs text-gray-400 mt-1">Add custom rules and constraints the AI must follow when fixing and generating schedules</p>
+              </div>
+              <button onClick={() => setShowRulesModal(false)} className="text-gray-400 hover:text-white"><FiX size={20} /></button>
+            </div>
+            <div className="p-5 flex-1 overflow-y-auto">
+              <textarea
+                value={scheduleRules}
+                onChange={e => setScheduleRules(e.target.value)}
+                placeholder={`Example rules:\n- Math should not be scheduled after lunch break\n- PE should only be on Monday, Wednesday, Friday\n- English and Hindi should not be in the same day\n- Science doubled periods must be in the morning\n- No teacher should teach more than 4 periods in a day\n- Arts/Music should be last period of the day\n- Teacher Mr. Khan is only available Mon-Wed\n- Keep hard subjects (Math, Science) in the morning slots\n- Friday afternoon should be activities/free period`}
+                className="w-full h-64 p-4 bg-gray-800 rounded-xl border border-gray-700 text-white text-sm resize-none focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center justify-between p-5 border-t border-gray-800">
+              <p className="text-xs text-gray-500">{scheduleRules.trim() ? `${scheduleRules.split('\n').filter(l => l.trim()).length} rule(s) active` : 'No rules set — AI uses default logic'}</p>
+              <div className="flex gap-2">
+                <button onClick={() => setScheduleRules('')} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition">Clear Rules</button>
+                <button onClick={() => setShowRulesModal(false)} className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white rounded-lg font-semibold text-sm transition">Save & Close</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

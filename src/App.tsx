@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   FiUsers, FiUser, FiDollarSign, FiTrendingDown, FiBarChart2, FiPlus, FiEdit2,
   FiTrash2, FiDownload, FiUpload, FiFileText, FiX, FiCheck, FiAlertCircle,
-  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiBell, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu
+  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu, FiSave
 } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -16,15 +16,16 @@ import {
   addEquipment, getEquipments, updateEquipment, deleteEquipment,
   saveBatchAttendance, saveAttendance, getAttendance, deleteAttendance,
   addHoliday, getHolidays, deleteHoliday,
-  addReminder, getReminders, updateReminder, deleteReminder, getNextSequentialId,
+  getNextSequentialId,
   uploadImage, generateAutoId,
   addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit,
   addSubject, getSubjects, updateSubject, deleteSubject,
   saveTeacherSubjects, getTeacherSubjects, deleteTeacherSubject,
   saveTimetableEntries, getTimetableEntries, deleteTimetableForClass, deleteTimetableEntry,
-  saveSubjectConfig, getSubjectConfigs, deleteSubjectConfig
+  saveSubjectConfig, getSubjectConfigs, deleteSubjectConfig,
+
 } from './firebase';
-import { Student, Fee, Expense, Employee, Equipment, Attendance as Att, Holiday, Reminder, SchoolLogo } from './types';
+import { Student, Fee, Expense, Employee, Equipment, Attendance as Att, Holiday, SchoolLogo } from './types';
 import { getColors as getPDFColors, getPDFColorsFromSettings, drawHeader as pdfHeader, drawFooter as pdfFooter, drawCoverPage as pdfCover, fmtDate as pdfDate, money as pdfMoney, getStatusColor as pdfStatusColor } from './PDFHelper';
 import { AppModals } from './Modals';
 import { AttendanceSection } from './Attendance';
@@ -32,7 +33,7 @@ import { ScheduleSection } from './Schedule';
 import type { SalarySlipData } from './salarySlipTypes';
 import AIAssistant from './components/AIAssistant';
 
-type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'reminders' | 'schedule' | 'correction' | 'ai';
+type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -43,8 +44,11 @@ const App: React.FC = () => {
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [attendance, setAttendance] = useState<Att[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [reminderForm, setReminderForm] = useState<Reminder>({ title: '', description: '', date: '', time: '09:00', type: 'Fee Collection', priority: 'Medium', status: 'Pending' });
+  const [docEditSelectedStudents, setDocEditSelectedStudents] = useState<string[]>([]);
+  const [docEditSearch, setDocEditSearch] = useState('');
+  const [docEditClassFilter, setDocEditClassFilter] = useState('');
+  const [docEditState, setDocEditState] = useState<Record<string, string[]>>({});
+  const [docEditSaving, setDocEditSaving] = useState(false);
   const [importProgress, setImportProgress] = useState<{ active: boolean; current: number; total: number; status: string; success: number; failed: number }>({ active: false, current: 0, total: 0, status: '', success: 0, failed: 0 });
   const isReadOnly = false; // Read-only mode removed - always full access
   const [showModal, setShowModal] = useState(false);
@@ -170,7 +174,7 @@ const App: React.FC = () => {
     const msg = getFirebaseErrorMessage(error, fallback);
     showNotification(msg, 'error');
   }, [showNotification]);
-  const loadData = useCallback(async () => { try { const [s, f, e, emp, eq, att, hol, rem] = await Promise.all([getStudents(), getFees(), getExpenses(), getEmployees(), getEquipments(), getAttendance(), getHolidays(), getReminders()]); setStudents((s as Student[]).sort((a, b) => { const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER; const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER; if (ao !== bo) return ao - bo; return (a.name || '').localeCompare(b.name || ''); })); setFees(f as Fee[]); setExpenses(e as Expense[]); setEmployees(emp as Employee[]); setEquipments(eq as Equipment[]); setAttendance(att as Att[]); setHolidays(hol as Holiday[]); setReminders(rem as Reminder[]); } catch (error) { showFirebaseError(error, 'Failed to load data'); } }, [showFirebaseError]);
+  const loadData = useCallback(async () => { try { const [s, f, e, emp, eq, att, hol] = await Promise.all([getStudents(), getFees(), getExpenses(), getEmployees(), getEquipments(), getAttendance(), getHolidays()]); setStudents((s as Student[]).sort((a, b) => { const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER; const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER; if (ao !== bo) return ao - bo; return (a.name || '').localeCompare(b.name || ''); })); setFees(f as Fee[]); setExpenses(e as Expense[]); setEmployees(emp as Employee[]); setEquipments(eq as Equipment[]); setAttendance(att as Att[]); setHolidays(hol as Holiday[]); } catch (error) { showFirebaseError(error, 'Failed to load data'); } }, [showFirebaseError]);
   const handleRefresh = async () => { setRefreshing(true); await loadData(); setTimeout(() => { setRefreshing(false); showNotification('Data refreshed successfully', 'success'); }, 500); };
 
   // Generate read-only share link and copy to clipboard
@@ -1892,14 +1896,10 @@ const App: React.FC = () => {
       margin: { left: ML, right: ML },
       head: [['#', 'Category', 'Description', 'Amount (Rs)', 'Paid To', 'Date', 'Status']],
       body: rows,
-      foot: [[
-        { content: 'TOTAL: Rs ' + totalExpense.toLocaleString('en-IN'), colSpan: 7, styles: { halign: 'right', fontStyle: 'bold', fontSize: 12 } },
-      ]],
       theme: 'grid',
       headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 8, halign: 'center' },
       bodyStyles: { textColor: sText, fontSize: 7, halign: 'center' },
       alternateRowStyles: { fillColor: [248, 250, 252] },
-      footStyles: { fillColor: [239, 68, 68], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9, halign: 'center' },
       columnStyles: {
         0: { cellWidth: 16, halign: 'center' },
         1: { cellWidth: 28, halign: 'center' },
@@ -1916,6 +1916,19 @@ const App: React.FC = () => {
         }
       },
     });
+
+    const tableEnd = (doc as any).lastAutoTable.finalY + 10;
+    const cardW = 80, cardH = 22;
+    const cardX = pw / 2 - cardW / 2;
+    doc.setFillColor(239, 68, 68);
+    doc.roundedRect(cardX, tableEnd, cardW, cardH, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Expense', cardX + cardW / 2, tableEnd + 8, { align: 'center' });
+    doc.setFontSize(12);
+    doc.text('Rs ' + totalExpense.toLocaleString('en-IN'), cardX + cardW / 2, tableEnd + 17, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
 
     pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
     doc.save('Expense_Report.pdf');
@@ -1984,6 +1997,19 @@ const App: React.FC = () => {
         5: { cellWidth: 25, halign: 'center' },
       },
     });
+
+    const tableEnd = (doc as any).lastAutoTable.finalY + 10;
+    const cardW = 80, cardH = 22;
+    const cardX = pw / 2 - cardW / 2;
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(cardX, tableEnd, cardW, cardH, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Collected', cardX + cardW / 2, tableEnd + 8, { align: 'center' });
+    doc.setFontSize(12);
+    doc.text('Rs ' + grandCollected.toLocaleString('en-IN'), cardX + cardW / 2, tableEnd + 17, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
 
     const totalRevenue = fees.filter(f => f.status === 'paid').reduce((s, f) => s + f.amount, 0);
     const totalExpenses = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0);
@@ -2389,9 +2415,86 @@ const App: React.FC = () => {
         }
       }
     });
+
+    const totalCollected = fees.filter(f => getEffectiveFeeStatus(f) === 'paid').reduce((s, f) => s + f.amount, 0);
+    const tableEnd = (doc as any).lastAutoTable.finalY + 10;
+    const cardW = 80, cardH = 22;
+    const cardX = pw / 2 - cardW / 2;
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(cardX, tableEnd, cardW, cardH, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Collected', cardX + cardW / 2, tableEnd + 8, { align: 'center' });
+    doc.setFontSize(12);
+    doc.text('Rs ' + totalCollected.toLocaleString('en-IN'), cardX + cardW / 2, tableEnd + 17, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+
     pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
     doc.save('Fee_Transactions.pdf');
     showNotification('Fee transactions PDF exported successfully', 'success');
+  };
+
+  const exportFeesByStudentPDF = () => {
+    const filtered = students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter));
+    if (filtered.length === 0) { showNotification('No active students found', 'error'); return; }
+    const doc = new jsPDF();
+    const pw = 210;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const bodySize = schoolSettings.pdfBodySize || 10;
+
+    const studentData = filtered.map(s => {
+      const i = getStudentPaymentInfo(s);
+      return { autoId: s.autoId, name: s.name, class: s.class, totalPackage: i.totalPackage, totalPaid: i.totalPaid, balance: i.balance, totalOverdue: i.totalOverdue, paymentStatus: i.paymentStatus };
+    });
+    const grandTarget = studentData.reduce((s, r) => s + r.totalPackage, 0);
+    const grandPaid = studentData.reduce((s, r) => s + r.totalPaid, 0);
+    const grandBalance = studentData.reduce((s, r) => s + r.balance, 0);
+
+    pdfHeader(doc, 'Fees by Student Report', pdfDate(), c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    autoTable(doc, {
+      head: [['Auto ID', 'Name', 'Class', 'Package', 'Paid', 'Balance', 'Overdue', 'Status']],
+      body: studentData.map(r => [r.autoId, r.name, r.class, pdfMoney(r.totalPackage), pdfMoney(r.totalPaid), pdfMoney(r.balance), pdfMoney(r.totalOverdue), r.paymentStatus]),
+      startY: 36, theme: 'striped',
+      headStyles: { fillColor: c.primary, textColor: c.white, fontSize: bodySize, fontStyle: 'bold', cellPadding: 3.5 },
+      bodyStyles: { fontSize: bodySize - 1, textColor: c.dark, cellPadding: 3 },
+      alternateRowStyles: { fillColor: c.light },
+      columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'center' } },
+      margin: { left: 10, right: 10, bottom: 20 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 7) {
+          data.cell.styles.textColor = pdfStatusColor(String(data.cell.raw));
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    });
+
+    const tableEnd = (doc as any).lastAutoTable.finalY + 12;
+    const cardW = 52, cardH = 26;
+    const gap = 6;
+    const totalW = cardW * 3 + gap * 2;
+    const startX = pw / 2 - totalW / 2;
+
+    const drawCard = (x: number, y: number, label: string, amount: number, r: number, g: number, b: number) => {
+      doc.setFillColor(r, g, b);
+      doc.roundedRect(x, y, cardW, cardH, 3, 3, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, x + cardW / 2, y + 9, { align: 'center' });
+      doc.setFontSize(10);
+      doc.text('Rs ' + amount.toLocaleString('en-IN'), x + cardW / 2, y + 19, { align: 'center' });
+    };
+
+    drawCard(startX, tableEnd, 'Targeted Amount', grandTarget, 59, 130, 246);
+    drawCard(startX + cardW + gap, tableEnd, 'Total Paid', grandPaid, 16, 185, 129);
+    drawCard(startX + (cardW + gap) * 2, tableEnd, 'Total Balance', grandBalance, 245, 158, 11);
+
+    doc.setFont('helvetica', 'normal');
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save('Fees_By_Student_Report.pdf');
+    showNotification('Fees by Student report exported successfully', 'success');
   };
 
   const exportFeeInvoice = (fee: Fee) => {
@@ -2621,14 +2724,54 @@ const App: React.FC = () => {
       if (type === 'expense') await deleteExpense(id);
       if (type === 'employee') await deleteEmployee(id);
       if (type === 'equipment') await deleteEquipment(id);
-      if (type === 'reminder') await deleteReminder(id);
       await loadData();
       showNotification(type === 'student' ? 'Student deleted and IDs stabilized successfully' : 'Record deleted successfully', 'success');
     } catch (error) {
       showFirebaseError(error, 'Failed to delete record');
     }
   };
-  const handleSaveReminder = async () => { if (!reminderForm.title.trim()) return showNotification('Reminder title required', 'error'); try { if (modalType === 'edit' && currentRecord?.id) await updateReminder(currentRecord.id, reminderForm); else await addReminder(reminderForm); closeModal(); setReminderForm({ title: '', description: '', date: '', time: '09:00', type: 'Fee Collection', priority: 'Medium', status: 'Pending' }); loadData(); showNotification('Reminder saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save reminder'); } };
+
+  const handleDocEditToggle = (studentId: string, docName: string) => {
+    setDocEditState(prev => {
+      const currentDocs = prev[studentId] || [];
+      const updated = currentDocs.includes(docName)
+        ? currentDocs.filter(d => d !== docName)
+        : [...currentDocs, docName];
+      return { ...prev, [studentId]: updated };
+    });
+  };
+
+  const handleDocEditSelectAll = (docName: string) => {
+    setDocEditState(prev => {
+      const updated = { ...prev };
+      docEditSelectedStudents.forEach(sid => {
+        const currentDocs = updated[sid] || [];
+        updated[sid] = currentDocs.includes(docName)
+          ? currentDocs.filter(d => d !== docName)
+          : [...currentDocs, docName];
+      });
+      return updated;
+    });
+  };
+
+  const handleDocEditSave = async () => {
+    setDocEditSaving(true);
+    try {
+      const promises = docEditSelectedStudents.map(sid => {
+        const student = students.find(s => s.autoId === sid);
+        if (!student?.id) return Promise.resolve();
+        const docs = docEditState[sid] || student.submittedDocuments || [];
+        return updateStudent(student.id, { submittedDocuments: docs });
+      });
+      await Promise.all(promises);
+      await loadData();
+      showNotification(`Updated ${docEditSelectedStudents.length} student(s) successfully`, 'success');
+    } catch (error) {
+      showFirebaseError(error, 'Failed to update student documents');
+    }
+    setDocEditSaving(false);
+  };
+
   const openAddModal = async () => {
     resetModalSubViews();
     setModalType('add');
@@ -2683,10 +2826,6 @@ const App: React.FC = () => {
 
     if (type === 'employee') {
       setEmployeeForm(record);
-    }
-
-    if (type === 'reminder') {
-      setReminderForm(record);
     }
 
     setShowModal(true);
@@ -3398,8 +3537,8 @@ const App: React.FC = () => {
     { name: 'Lost', value: equipments.filter(eq => eq.condition === 'Lost').length },
   ].filter(item => item.value > 0);
 
-  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reminders', icon: FiBell, label: 'Reminders' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }, { id: 'correction', icon: FiEdit2, label: 'Correction' }, { id: 'ai', icon: FiCpu, label: 'AI Assistant' }];
-  const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : activeTab === 'students' ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : activeTab === 'reminders' ? 'Reminder Management' : 'Employee Management';
+  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }, { id: 'studentedit', icon: FiEdit2, label: 'Student Edit' }, { id: 'correction', icon: FiEdit2, label: 'Correction' }, { id: 'ai', icon: FiCpu, label: 'AI Assistant' }];
+  const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : activeTab === 'students' ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : 'Employee Management';
 
   const searchBtn = "flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 px-5 py-3 rounded-xl transition-all";
 
@@ -3471,30 +3610,6 @@ const App: React.FC = () => {
       )}
       {showImageModal && <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4"><div className="bg-[#1E1E1E] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] flex flex-col"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold text-cyan-400">Bill Preview</h3><button onClick={() => setShowImageModal(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div><div className="flex-1 overflow-auto"><img src={previewImage} alt="Bill" className="w-full rounded-lg" /></div></div></div>}
 
-      {/* Reminder Form Modal */}
-      {showModal && activeTab === 'reminders' && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[#1E1E1E] rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-gray-800 shadow-2xl">
-            <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-800">
-              <h3 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">{modalType === 'add' ? 'Add Reminder' : 'Edit Reminder'}</h3>
-              <button onClick={closeModal} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={28} /></button>
-            </div>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1 md:col-span-2"><label className="text-xs text-cyan-400">Title</label><input placeholder="Reminder Title" value={reminderForm.title} onChange={e => setReminderForm({ ...reminderForm, title: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Date</label><input type="date" value={reminderForm.date} onChange={e => setReminderForm({ ...reminderForm, date: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Time</label><input type="time" value={reminderForm.time} onChange={e => setReminderForm({ ...reminderForm, time: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Type</label><select value={reminderForm.type} onChange={e => setReminderForm({ ...reminderForm, type: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option>Fee Collection</option><option>Salary Payment</option><option>Meeting</option><option>Event</option><option>Payment Due</option><option>Exam</option><option>Other</option></select></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Priority</label><select value={reminderForm.priority} onChange={e => setReminderForm({ ...reminderForm, priority: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option>High</option><option>Medium</option><option>Low</option></select></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Status</label><select value={reminderForm.status} onChange={e => setReminderForm({ ...reminderForm, status: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option>Pending</option><option>Completed</option><option>Cancelled</option></select></div>
-                <div className="space-y-1 md:col-span-2"><label className="text-xs text-cyan-400">Description</label><textarea placeholder="Description (optional)" value={reminderForm.description} onChange={e => setReminderForm({ ...reminderForm, description: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-24" /></div>
-              </div>
-              <button onClick={handleSaveReminder} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg transition-all shadow-lg shadow-cyan-500/20">{modalType === 'add' ? 'Add Reminder' : 'Update Reminder'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
 
       {showModal && activeTab === 'equipments' && (
         <div className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -3530,7 +3645,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showModal && activeTab !== 'reminders' && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
+      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
 
       <div className="fixed left-0 top-0 h-full w-72 bg-[#1E1E1E] border-r border-gray-800 p-6 flex flex-col z-40">
         <div className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-8 flex items-center gap-3 shrink-0">
@@ -3551,7 +3666,7 @@ const App: React.FC = () => {
       <div className="ml-72 p-8">
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'ai' ? 'AI Assistant' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -3564,7 +3679,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!['students', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'reminders', 'schedule', 'ai'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
+        {!['students', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'schedule', 'studentedit', 'ai'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
 
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
@@ -3697,7 +3812,7 @@ const App: React.FC = () => {
                 {[...new Set(students.map(s => s.class).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <button onClick={() => exportToExcel(students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).map(s => { const i = getStudentPaymentInfo(s); return { 'Auto ID': s.autoId, 'Name': s.name, 'Class': s.class, 'Package': i.totalPackage, 'Paid': i.totalPaid, 'Balance': i.balance, 'Overdue': i.totalOverdue, 'Status': i.paymentStatus }; }), 'Fees By Student')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button>
-              <button onClick={() => exportToPDF(students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).map(s => { const i = getStudentPaymentInfo(s); return { 'Auto ID': s.autoId, 'Name': s.name, 'Class': s.class, 'Package': i.totalPackage, 'Paid': i.totalPaid, 'Balance': i.balance, 'Overdue': i.totalOverdue, 'Status': i.paymentStatus }; }), 'Fees By Student Report')} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>
+              <button onClick={() => exportFeesByStudentPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Class</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Package</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Balance</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Overdue</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Progress</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th></tr></thead>
@@ -3886,60 +4001,127 @@ const App: React.FC = () => {
           />
         )}
 
-        {/* ===== REMINDERS ===== */}
-        {activeTab === 'reminders' && (
-          <div className="space-y-6">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Reminders</p><p className="text-2xl font-bold text-cyan-400">{reminders.length}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">High Priority</p><p className="text-2xl font-bold text-red-400">{reminders.filter(r => r.priority === 'High').length}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Pending</p><p className="text-2xl font-bold text-yellow-400">{reminders.filter(r => r.status === 'Pending').length}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Completed</p><p className="text-2xl font-bold text-emerald-400">{reminders.filter(r => r.status === 'Completed').length}</p></div>
+
+        {/* ===== STUDENT DOCUMENT EDIT ===== */}
+        {activeTab === 'studentedit' && (() => {
+          const classFiltered = students.filter(s => !docEditClassFilter || s.class === docEditClassFilter);
+          const filtered = classFiltered.filter(s => {
+            const q = docEditSearch.toLowerCase();
+            return (!q || s.name.toLowerCase().includes(q) || s.autoId.toLowerCase().includes(q));
+          });
+          const initDocState = () => {
+            const state: Record<string, string[]> = {};
+            docEditSelectedStudents.forEach(sid => {
+              const student = students.find(s => s.autoId === sid);
+              state[sid] = docEditState[sid] || (student?.submittedDocuments ? [...student.submittedDocuments] : []);
+            });
+            return state;
+          };
+          const activeState = docEditSelectedStudents.length > 0 ? initDocState() : {};
+          const selectedStudents = filtered.filter(s => docEditSelectedStudents.includes(s.autoId));
+          const uniqueClasses = [...new Set(students.map(s => s.class).filter(Boolean))].sort();
+
+          return (
+            <div className="space-y-4">
+              {documentOptions.length === 0 ? (
+                <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-12 text-center">
+                  <FiEdit2 size={48} className="mx-auto mb-4 text-gray-600" />
+                  <p className="text-gray-400 text-lg mb-2">No documents configured</p>
+                  <p className="text-gray-500 text-sm">Go to Students tab &gt; Add/Edit Student &gt; Manage Documents to add document types first.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Toolbar */}
+                  <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-4">
+                    <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="relative flex-1 max-w-xs">
+                          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
+                          <input placeholder="Search students..." value={docEditSearch} onChange={e => setDocEditSearch(e.target.value)} className="w-full pl-9 pr-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 transition" />
+                        </div>
+                        <select value={docEditClassFilter} onChange={e => { setDocEditClassFilter(e.target.value); setDocEditSelectedStudents([]); }} className="py-2.5 px-3 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 transition min-w-[140px]">
+                          <option value="">All Classes</option>
+                          {uniqueClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setDocEditSelectedStudents(prev => { const ids = filtered.map(s => s.autoId); return [...new Set([...prev, ...ids])]; })} className="px-4 py-2 text-xs bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 transition font-semibold">Select All</button>
+                        <button onClick={() => setDocEditSelectedStudents([])} className="px-4 py-2 text-xs bg-gray-700 text-gray-400 rounded-lg hover:bg-gray-600 transition font-semibold">Clear</button>
+                        <span className="text-xs text-gray-500">{docEditSelectedStudents.length} of {filtered.length} selected</span>
+                        <button onClick={handleDocEditSave} disabled={docEditSaving || docEditSelectedStudents.length === 0} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 px-6 py-2.5 rounded-xl font-semibold shadow-lg shadow-emerald-500/20 transition">
+                          <FiSave size={16} />{docEditSaving ? 'Saving...' : 'Update All'}
+                        </button>
+                      </div>
+                    </div>
+                    {/* Student chips */}
+                    {filtered.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2 max-h-28 overflow-y-auto">
+                        {filtered.map(s => {
+                          const selected = docEditSelectedStudents.includes(s.autoId);
+                          return (
+                            <button key={s.autoId} onClick={() => setDocEditSelectedStudents(prev => selected ? prev.filter(id => id !== s.autoId) : [...prev, s.autoId])} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition ${selected ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600'}`}>
+                              <span className="truncate max-w-[120px]">{s.name}</span>
+                              <span className="text-[10px] opacity-60">{s.class}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Document Matrix */}
+                  {docEditSelectedStudents.length === 0 ? (
+                    <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-12 text-center">
+                      <FiUsers size={48} className="mx-auto mb-4 text-gray-600" />
+                      <p className="text-gray-400 text-lg mb-2">Select students above to edit their documents</p>
+                      <p className="text-gray-500 text-sm">Click student chips to select, then tick documents in the matrix below.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
+                      <div className="overflow-auto max-h-[calc(100vh-340px)]">
+                        <table className="w-full">
+                          <thead className="bg-gray-800/50 sticky top-0 z-10">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap sticky left-0 bg-gray-800/80 backdrop-blur z-20 min-w-[160px]">Student</th>
+                              {documentOptions.map(doc => (
+                                <th key={doc} className="px-3 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap min-w-[90px]">
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="truncate max-w-[110px]">{doc}</span>
+                                    <button onClick={() => handleDocEditSelectAll(doc)} className="text-[10px] text-cyan-400 hover:text-cyan-300 underline">Toggle All</button>
+                                  </div>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedStudents.map(s => (
+                              <tr key={s.autoId} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
+                                <td className="px-4 py-3 sticky left-0 bg-[#1E1E1E] backdrop-blur z-10">
+                                  <p className="font-semibold text-sm truncate">{s.name}</p>
+                                  <p className="text-xs text-gray-500">{s.autoId} &middot; {s.class}</p>
+                                </td>
+                                {documentOptions.map(doc => {
+                                  const checked = (activeState[s.autoId] || []).includes(doc);
+                                  return (
+                                    <td key={doc} className="px-3 py-3 text-center">
+                                      <label className="inline-flex items-center justify-center cursor-pointer">
+                                        <input type="checkbox" checked={checked} onChange={() => handleDocEditToggle(s.autoId, doc)} className="w-5 h-5 accent-cyan-500 rounded" />
+                                      </label>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-            {/* Toolbar */}
-            <div className="flex flex-col lg:flex-row gap-4">
-              <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search reminders..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Reminder</button>
-            </div>
-            {/* Reminders List */}
-            <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-800/50">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Title</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Type</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Date & Time</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Priority</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reminders.filter(r => r.title.toLowerCase().includes(searchTerm.toLowerCase()) || r.type.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 ? (
-                      <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500"><FiBell size={32} className="mx-auto mb-3 opacity-50" /><p>No reminders found. Click "Add Reminder" to create one.</p></td></tr>
-                    ) : reminders.filter(r => r.title.toLowerCase().includes(searchTerm.toLowerCase()) || r.type.toLowerCase().includes(searchTerm.toLowerCase())).map(r => (
-                      <tr key={r.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
-                        <td className="px-6 py-4">
-                          <p className="font-semibold">{r.title}</p>
-                          {r.description && <p className="text-xs text-gray-400 mt-1 truncate max-w-xs">{r.description}</p>}
-                        </td>
-                        <td className="px-6 py-4 hidden md:table-cell"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{r.type}</span></td>
-                        <td className="px-6 py-4">
-                          <p className="text-sm flex items-center gap-1"><FiCalendar size={12} className="text-gray-500" />{r.date || '—'}</p>
-                          <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5"><FiClock size={10} />{r.time || '—'}</p>
-                        </td>
-                        <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${r.priority === 'High' ? 'bg-red-500/20 text-red-400' : r.priority === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{r.priority}</span></td>
-                        <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${r.status === 'Completed' ? 'bg-emerald-500/20 text-emerald-400' : r.status === 'Pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}`}>{r.status}</span></td>
-                        <td className="px-6 py-4"><div className="flex gap-2"><button onClick={() => openEditModal(r, 'reminder')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={16} /></button><button onClick={() => handleDelete(r.id!, 'reminder')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={16} /></button></div></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
 
         {/* ===== CORRECTION / RE-SEQUENCE ===== */}

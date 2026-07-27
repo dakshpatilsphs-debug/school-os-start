@@ -61,10 +61,6 @@ export interface Attendance {
 export interface Holiday {
   id?: string; date: string; name: string; type: 'manual' | 'sunday';
 }
-export interface Reminder {
-  id?: string; title: string; description: string; date: string; time: string;
-  type: string; priority: string; status: string;
-}
 
 export const SchoolLogo = ({ size = 26 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -110,6 +106,7 @@ export interface SubjectConfig {
   doubled: boolean;
   allowSameDay?: boolean;
   noTeacher?: boolean;
+  periodsPerWeek?: number;
 }
 
 export interface PeriodSlot {
