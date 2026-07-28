@@ -56,6 +56,13 @@ const getClMonthlyLimit = (emp: Employee | undefined | null) => {
   return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 1;
 };
 
+// Only apply monthly cap for current/future months; past months are unaffected
+const getMonthCap = (monthKey: string, monthLim: number, annualQuota: number) => {
+  const now = new Date();
+  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return monthKey < cur ? annualQuota : monthLim;
+};
+
 // CL monthly limit applies only from current month onwards; old entries are untouched.
 const getCLUsedBeforeMonth = (_empId: string, _monthKey: string, _allAttendance: Att[], _monthlyLimit: number, _annualQuota: number) => {
   return 0;
@@ -375,7 +382,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       const monthLim = getClMonthlyLimit(e);
       const usedBefore = getCLUsedBeforeMonth(e.autoId, currentMonth, attendance, monthLim, annualQuota);
       const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-      const autoCover = Math.min(si.absentDays, monthLim, remainingAnnual);
+      const autoCover = Math.min(si.absentDays, getMonthCap(currentMonth, monthLim, annualQuota), remainingAnnual);
       const effPresent = si.presentDays + autoCover;
       const effAbsent = Math.max(0, si.absentDays - autoCover);
       const effSalary = Math.round(effPresent * si.perDaySalary);
@@ -921,7 +928,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const monthLim = getClMonthlyLimit(emp);
     const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
     const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-    const autoCover = Math.min(info.absentDays, monthLim, remainingAnnual);
+                        const autoCover = Math.min(info.absentDays, getMonthCap(selectedDate.substring(0, 7), monthLim, annualQuota), remainingAnnual);
     const effectivePresent = info.presentDays + autoCover;
     const effectiveAbsent = Math.max(0, info.absentDays - autoCover);
     const perDaySalary = info.perDaySalary;
@@ -1266,7 +1273,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const monthLim = getClMonthlyLimit(e);
                         const usedBefore = getCLUsedBeforeMonth(e.autoId, selectedDate.substring(0, 7), attendance, monthLim, annualQuota);
                         const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-                        const autoCover = Math.min(info.absentDays, monthLim, remainingAnnual);
+                        const autoCover = Math.min(info.absentDays, getMonthCap(selectedDate.substring(0, 7), monthLim, annualQuota), remainingAnnual);
                         const effAbsent = Math.max(0, info.absentDays - autoCover);
                         const effSalary = Math.round((info.presentDays + autoCover) * info.perDaySalary);
                         const clLeft = Math.max(0, remainingAnnual - autoCover);

@@ -44,6 +44,12 @@ const getClMonthlyLimit = (emp: Employee | undefined | null) => {
   return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 1;
 };
 
+const getMonthCap = (monthKey: string, monthLim: number, annualQuota: number) => {
+  const now = new Date();
+  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return monthKey < cur ? annualQuota : monthLim;
+};
+
 const getAcademicYearStart = (monthKey: string) => {
   const [, month] = monthKey.split('-').map(Number);
   const year = parseInt(monthKey.substring(0, 4));
@@ -1215,7 +1221,7 @@ const App: React.FC = () => {
       } else {
         const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
         const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-        clUsedNum = Math.min(absentDays, monthLim, remainingAnnual);
+        clUsedNum = Math.min(absentDays, getMonthCap(currentMonth, monthLim, annualQuota), remainingAnnual);
         clRemainingNum = Math.max(0, remainingAnnual - clUsedNum);
       }
 
@@ -1458,7 +1464,7 @@ const App: React.FC = () => {
     const monthLim = getClMonthlyLimit(emp);
     const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
     const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-    const autoCover = Math.min(absentDays, monthLim, remainingAnnual);
+    const autoCover = Math.min(absentDays, getMonthCap(currentMonth, monthLim, annualQuota), remainingAnnual);
     const effectiveAbsent = Math.max(0, absentDays - autoCover);
     const effectivePresent = presentDays + autoCover;
     const effectiveEarnedSalary = Math.round(effectivePresent * perDaySalary);
@@ -1586,7 +1592,7 @@ const App: React.FC = () => {
       const monthLim = getClMonthlyLimit(emp);
       const usedBefore = getCLUsedBeforeMonth(emp.autoId, month, attendance, monthLim, annualQuota);
       const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-      const autoCover = Math.min(absentDays, monthLim, remainingAnnual);
+      const autoCover = Math.min(absentDays, getMonthCap(month, monthLim, annualQuota), remainingAnnual);
       const effPresent = presentDays + autoCover;
       const effAbsent = Math.max(0, absentDays - autoCover);
       const earnedSalary = Math.round(effPresent * perDaySalary);
