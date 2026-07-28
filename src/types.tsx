@@ -40,6 +40,8 @@ export interface Employee {
   salaryAutoRefresh?: boolean;
   salaryRefreshDay?: number;
   inactiveDate?: string;
+  clQuota?: number;
+  clAllowance?: number;
 
 }
 export interface CausalLeave { id?: string; employeeId: string; date: string; reason: string; }

@@ -45,16 +45,20 @@ const getAcademicYearStart = (monthKey: string) => {
   return `${startYear}-06`;
 };
 
-// Count total absent days for an employee from academic year start up to (but not including) the given month
-const getCLUsedBeforeMonth = (employeeId: string, monthKey: string, allAttendance: Att[]) => {
-  const academicYearStart = getAcademicYearStart(monthKey);
-  return allAttendance.filter(a => {
-    if (a.personId !== employeeId || a.status !== 'absent') return false;
-    const attMonth = a.date.substring(0, 7);
-    if (attMonth < academicYearStart) return false;
-    if (attMonth >= monthKey) return false;
-    return true;
-  }).length;
+// Get effective CL quota for an employee (per-employee override or global fallback)
+const getEmpClQuota = (emp?: Employee | null) => {
+  const global = Math.max(0, parseInt(localStorage.getItem('clQuota') || '12'));
+  return emp?.clQuota && emp.clQuota > 0 ? emp.clQuota : global;
+};
+
+// Get max CL days allowed per month for an employee
+const getClMonthlyLimit = (emp: Employee | undefined | null) => {
+  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 1;
+};
+
+// CL monthly limit applies only from current month onwards; old entries are untouched.
+const getCLUsedBeforeMonth = (_empId: string, _monthKey: string, _allAttendance: Att[], _monthlyLimit: number, _annualQuota: number) => {
+  return 0;
 };
 
 export const AttendanceSection: React.FC<AttendanceProps> = ({
@@ -364,13 +368,14 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
   const exportMonthlySalaryReport = () => {
     const currentMonth = selectedDate.substring(0, 7);
-    const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
     const data = activeEmps.map(e => {
       const si = getEmployeeSalaryInfo(e);
-      const clUsedBefore = getCLUsedBeforeMonth(e.autoId, currentMonth, attendance);
-      const remainingQuota = Math.max(0, quota - clUsedBefore);
-      const autoCover = Math.min(si.absentDays, remainingQuota);
+      const annualQuota = getEmpClQuota(e);
+      const monthLim = getClMonthlyLimit(e);
+      const usedBefore = getCLUsedBeforeMonth(e.autoId, currentMonth, attendance, monthLim, annualQuota);
+      const remainingAnnual = Math.max(0, annualQuota - usedBefore);
+      const autoCover = Math.min(si.absentDays, monthLim, remainingAnnual);
       const effPresent = si.presentDays + autoCover;
       const effAbsent = Math.max(0, si.absentDays - autoCover);
       const effSalary = Math.round(effPresent * si.perDaySalary);
@@ -613,8 +618,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const bd = salaryData ? { grossSalary: salaryData.salary.monthlyGross, earnedSalary: salaryData.salary.earnedSalary, totalDeductions: salaryData.salary.deductions } : getSalaryBreakdown(emp, si);
     const pw = 210;
     const clUsed = salaryData ? salaryData.attendance.casualLeavesUsed : casualLeavesUsed;
-    const quota = salaryData ? salaryData.attendance.casualLeavesRemaining + clUsed : clQuota;
-    const clRemaining = salaryData ? salaryData.attendance.casualLeavesRemaining : Math.max(0, quota - casualLeavesUsed);
+    const annualQuota = salaryData ? salaryData.attendance.casualLeavesRemaining + clUsed : clQuota;
+    const clRemaining = salaryData ? salaryData.attendance.casualLeavesRemaining : Math.max(0, annualQuota - casualLeavesUsed);
 
     // Color palette (RGB tuples) — derived from schoolSettings primary color
     const hexToRgb = (hex: string): [number, number, number] => {
@@ -912,10 +917,11 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const currentMonth = selectedDate.substring(0, 7);
     const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const info = getEmployeeSalaryInfo(emp);
-    const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-    const clUsedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance);
-    const remainingQuota = Math.max(0, quota - clUsedBefore);
-    const autoCover = Math.min(info.absentDays, remainingQuota);
+    const annualQuota = getEmpClQuota(emp);
+    const monthLim = getClMonthlyLimit(emp);
+    const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
+    const remainingAnnual = Math.max(0, annualQuota - usedBefore);
+    const autoCover = Math.min(info.absentDays, monthLim, remainingAnnual);
     const effectivePresent = info.presentDays + autoCover;
     const effectiveAbsent = Math.max(0, info.absentDays - autoCover);
     const perDaySalary = info.perDaySalary;
@@ -943,7 +949,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         presentDays: info.presentDays,
         absentDays: effectiveAbsent,
         casualLeavesUsed: autoCover,
-        casualLeavesRemaining: Math.max(0, remainingQuota - autoCover),
+        casualLeavesRemaining: Math.max(0, remainingAnnual - autoCover),
       },
       salary: {
         monthlyGross: info.monthlySalary,
@@ -1256,13 +1262,14 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     <tbody>
                       {filteredEmployees.map(e => {
                         const info = getEmployeeSalaryInfo(e);
-                        const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-                        const clUsedBefore = getCLUsedBeforeMonth(e.autoId, selectedDate.substring(0, 7), attendance);
-                        const remainingQuota = Math.max(0, quota - clUsedBefore);
-                        const autoCover = Math.min(info.absentDays, remainingQuota);
+                        const annualQuota = getEmpClQuota(e);
+                        const monthLim = getClMonthlyLimit(e);
+                        const usedBefore = getCLUsedBeforeMonth(e.autoId, selectedDate.substring(0, 7), attendance, monthLim, annualQuota);
+                        const remainingAnnual = Math.max(0, annualQuota - usedBefore);
+                        const autoCover = Math.min(info.absentDays, monthLim, remainingAnnual);
                         const effAbsent = Math.max(0, info.absentDays - autoCover);
                         const effSalary = Math.round((info.presentDays + autoCover) * info.perDaySalary);
-                        const clLeft = Math.max(0, remainingQuota - autoCover);
+                        const clLeft = Math.max(0, remainingAnnual - autoCover);
                         return (
                           <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>
@@ -1301,7 +1308,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-lg font-bold flex items-center gap-2"><FiSliders className="text-cyan-400" /> Casual Leave Settings</h3>
-                <p className="text-xs text-gray-400 mt-1">Configure casual leave quota allocated per employee per year.</p>
+                <p className="text-xs text-gray-400 mt-1">Configure casual leave quota allowed per employee per year, with a monthly usage limit.</p>
               </div>
               <button
                 onClick={() => { setClQuotaEdit(v => !v); setClQuotaInput(String(clQuota)); }}
@@ -1313,7 +1320,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             {clQuotaEdit ? (
               <div className="flex items-center gap-3 mt-2">
                 <div>
-                  <label className="text-xs text-cyan-400">Casual Leave Days / Year</label>
+                  <label className="text-xs text-cyan-400">CL Quota / Year</label>
                   <input
                     type="number" min={0} max={365}
                     value={clQuotaInput}
@@ -1328,7 +1335,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     setClQuota(n);
                     localStorage.setItem('clQuota', String(n));
                     setClQuotaEdit(false);
-                    showNotification(`Casual leave quota set to ${n} days`, 'success');
+                    showNotification(`CL quota set to ${n} days/year`, 'success');
                   }}
                   className="mt-5 px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-semibold transition"
                 >
@@ -1338,7 +1345,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             ) : (
               <div className="flex items-center gap-3 mt-2">
                 <span className="text-4xl font-bold text-cyan-400">{clQuota}</span>
-                <span className="text-gray-400 text-sm">casual leave days allocated per employee per year</span>
+                <span className="text-gray-400 text-sm">casual leave days allowed per employee per year</span>
               </div>
             )}
           </div>
@@ -1410,36 +1417,53 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
             {clViewEmpId && (() => {
               const emp = employees.find(e => e.autoId === clViewEmpId);
+              const annualQuota = getEmpClQuota(emp);
+              const monthLim = getClMonthlyLimit(emp);
+              const academicYearStart = getAcademicYearStart(selectedDate.substring(0, 7));
+              const currentMonthKey = selectedDate.substring(0, 7);
+              const usedThisYear = causalLeaves.filter(cl => {
+                const m = cl.date.substring(0, 7);
+                return m >= academicYearStart && m <= currentMonthKey;
+              }).length;
+              const usedThisMonth = causalLeaves.filter(cl => cl.date.substring(0, 7) === currentMonthKey).length;
+              const remainingYear = Math.max(0, annualQuota - usedThisYear);
               const used = causalLeaves.length;
-              const remaining = Math.max(0, clQuota - used);
               return (
                 <div className="space-y-4">
                   {/* Summary badges */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-cyan-400">{clQuota}</p>
-                      <p className="text-xs text-gray-400 mt-1">Total Quota</p>
+                      <p className="text-2xl font-bold text-cyan-400">{annualQuota}</p>
+                      <p className="text-xs text-gray-400 mt-1">Annual Quota</p>
+                    </div>
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold text-yellow-400">{monthLim}</p>
+                      <p className="text-xs text-gray-400 mt-1">Monthly Limit</p>
                     </div>
                     <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-red-400">{used}</p>
-                      <p className="text-xs text-gray-400 mt-1">Used</p>
+                      <p className="text-2xl font-bold text-red-400">{usedThisMonth}</p>
+                      <p className="text-xs text-gray-400 mt-1">Used This Month</p>
                     </div>
                     <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-emerald-400">{remaining}</p>
-                      <p className="text-xs text-gray-400 mt-1">Remaining</p>
+                      <p className="text-2xl font-bold text-emerald-400">{remainingYear}</p>
+                      <p className="text-xs text-gray-400 mt-1">Remaining (Year)</p>
+                    </div>
+                    <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold text-purple-400">{usedThisYear}/{annualQuota}</p>
+                      <p className="text-xs text-gray-400 mt-1">Year Usage</p>
                     </div>
                   </div>
 
                   {/* Progress bar */}
                   <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
-                      <span>Leave Usage</span>
-                      <span>{used}/{clQuota} days</span>
+                      <span>Annual Leave Usage</span>
+                      <span>{usedThisYear}/{annualQuota} days</span>
                     </div>
                     <div className="w-full bg-gray-800 rounded-full h-2">
                       <div
-                        className={`h-2 rounded-full transition-all ${remaining === 0 ? 'bg-red-500' : remaining <= 3 ? 'bg-yellow-500' : 'bg-cyan-500'}`}
-                        style={{ width: `${Math.min(100, (used / clQuota) * 100)}%` }}
+                        className={`h-2 rounded-full transition-all ${remainingYear === 0 ? 'bg-red-500' : remainingYear <= 3 ? 'bg-yellow-500' : 'bg-cyan-500'}`}
+                        style={{ width: `${Math.min(100, annualQuota > 0 ? (usedThisYear / annualQuota) * 100 : 0)}%` }}
                       />
                     </div>
                   </div>

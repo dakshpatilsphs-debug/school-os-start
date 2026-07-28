@@ -35,6 +35,26 @@ import AIAssistant from './components/AIAssistant';
 
 type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai';
 
+const getEmpClQuota = (emp?: Employee | null) => {
+  const global = Math.max(0, parseInt(localStorage.getItem('clQuota') || '12'));
+  return emp?.clQuota && emp.clQuota > 0 ? emp.clQuota : global;
+};
+
+const getClMonthlyLimit = (emp: Employee | undefined | null) => {
+  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 1;
+};
+
+const getAcademicYearStart = (monthKey: string) => {
+  const [, month] = monthKey.split('-').map(Number);
+  const year = parseInt(monthKey.substring(0, 4));
+  const startYear = month >= 6 ? year : year - 1;
+  return `${startYear}-06`;
+};
+
+const getCLUsedBeforeMonth = (_empId: string, _monthKey: string, _allAttendance: Att[], _monthlyLimit: number, _annualQuota: number) => {
+  return 0;
+};
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [students, setStudents] = useState<Student[]>([]);
@@ -1185,24 +1205,18 @@ const App: React.FC = () => {
       const perDaySalary = sd ? sd.salary.perDaySalary : (workingDays > 0 ? monthlySalary / workingDays : 0);
       const earnedSalary = sd ? sd.salary.earnedSalary : Math.round(presentDays * perDaySalary);
 
-      // CL yearly quota (academic year June–May)
-      const clQuotaVal = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
+      // CL annual quota with monthly limit
+      const annualQuota = getEmpClQuota(emp);
+      const monthLim = getClMonthlyLimit(emp);
       let clUsedNum = 0, clRemainingNum = 0;
       if (sd) {
         clUsedNum = sd.attendance.casualLeavesUsed;
         clRemainingNum = sd.attendance.casualLeavesRemaining;
       } else {
-        const [yr, mo] = currentMonth.split('-').map(Number);
-        const startYear = mo >= 6 ? yr : yr - 1;
-        const academicYearStart = `${startYear}-06`;
-        const clUsedBefore = attendance.filter(a =>
-          a.personId === emp.autoId && a.status === 'absent' &&
-          a.date.substring(0, 7) >= academicYearStart &&
-          a.date.substring(0, 7) < currentMonth
-        ).length;
-        const remainingQuota = Math.max(0, clQuotaVal - clUsedBefore);
-        clUsedNum = Math.min(absentDays, remainingQuota);
-        clRemainingNum = Math.max(0, remainingQuota - clUsedNum);
+        const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
+        const remainingAnnual = Math.max(0, annualQuota - usedBefore);
+        clUsedNum = Math.min(absentDays, monthLim, remainingAnnual);
+        clRemainingNum = Math.max(0, remainingAnnual - clUsedNum);
       }
 
       // ── CSS-derived design tokens (from SalarySlip.css) ──
@@ -1300,7 +1314,6 @@ const App: React.FC = () => {
         ['House Rent Allowance', 'Rs 0'],
         ['Travelling Allowance', 'Rs 0'],
         ['Medical Allowance', 'Rs 0'],
-        ['Conveyance Allowance', 'Rs 0'],
       ];
       const deductItems: [string, string][] = [
         ['EPF(%)', 'Rs 0'],
@@ -1441,16 +1454,11 @@ const App: React.FC = () => {
     const monthlySalary = (emp.monthSalary?.[currentMonth] ?? emp.salary) || 0;
     const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
     const earnedSalary = Math.round(presentDays * perDaySalary);
-    const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-    const startYear = month >= 6 ? year : year - 1;
-    const academicYearStart = `${startYear}-06`;
-    const clUsedBefore = attendance.filter(a =>
-      a.personId === emp.autoId && a.status === 'absent' &&
-      a.date.substring(0, 7) >= academicYearStart &&
-      a.date.substring(0, 7) < currentMonth
-    ).length;
-    const remainingQuota = Math.max(0, quota - clUsedBefore);
-    const autoCover = Math.min(absentDays, remainingQuota);
+    const annualQuota = getEmpClQuota(emp);
+    const monthLim = getClMonthlyLimit(emp);
+    const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
+    const remainingAnnual = Math.max(0, annualQuota - usedBefore);
+    const autoCover = Math.min(absentDays, monthLim, remainingAnnual);
     const effectiveAbsent = Math.max(0, absentDays - autoCover);
     const effectivePresent = presentDays + autoCover;
     const effectiveEarnedSalary = Math.round(effectivePresent * perDaySalary);
@@ -1476,7 +1484,7 @@ const App: React.FC = () => {
         presentDays,
         absentDays: effectiveAbsent,
         casualLeavesUsed: autoCover,
-        casualLeavesRemaining: Math.max(0, remainingQuota - autoCover),
+        casualLeavesRemaining: Math.max(0, remainingAnnual - autoCover),
       },
       salary: {
         monthlyGross: monthlySalary,
@@ -1574,20 +1582,15 @@ const App: React.FC = () => {
         workingDays++;
       }
       const perDaySalary = monthlySalary / (workingDays || 1);
-      const quota = Math.max(1, parseInt(localStorage.getItem('clQuota') || '12'));
-      const startYear = mo >= 6 ? yr : yr - 1;
-      const academicYearStart = `${startYear}-06`;
-      const clUsedBefore = attendance.filter(a =>
-        a.personId === emp.autoId && a.status === 'absent' &&
-        a.date.substring(0, 7) >= academicYearStart &&
-        a.date.substring(0, 7) < month
-      ).length;
-      const remainingQuota = Math.max(0, quota - clUsedBefore);
-      const autoCover = Math.min(absentDays, remainingQuota);
+      const annualQuota = getEmpClQuota(emp);
+      const monthLim = getClMonthlyLimit(emp);
+      const usedBefore = getCLUsedBeforeMonth(emp.autoId, month, attendance, monthLim, annualQuota);
+      const remainingAnnual = Math.max(0, annualQuota - usedBefore);
+      const autoCover = Math.min(absentDays, monthLim, remainingAnnual);
       const effPresent = presentDays + autoCover;
       const effAbsent = Math.max(0, absentDays - autoCover);
       const earnedSalary = Math.round(effPresent * perDaySalary);
-      const clLeft = Math.max(0, remainingQuota - autoCover);
+      const clLeft = Math.max(0, remainingAnnual - autoCover);
 
       // Build daily grid only for visual (mark only days with actual attendance records)
       const daily: { day: number; status: string }[] = [];
