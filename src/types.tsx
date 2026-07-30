@@ -11,10 +11,32 @@ export interface Student {
   discountAmount?: number;
   sortOrder?: number;
 }
+export interface FeeInstallment {
+  id: string;
+  dueDate: string;
+  amount: number;
+  paidDate?: string;
+  status: 'pending' | 'paid';
+}
+
 export interface Fee {
   id?: string; autoId: string; studentId: string; studentName: string; amount: number;
   type: string; dueDate: string; paidDate: string; status: 'paid' | 'pending' | 'overdue';
   description: string; billUrl?: string;
+
+  originalAmount?: number;
+  applyDiscount?: boolean;
+  discountType?: 'amount' | 'percent';
+  discountValue?: number;
+  discountAmount?: number;
+  payableAmount?: number;
+  paymentAmount?: number;
+  balanceAmount?: number;
+
+  paymentMode?: 'Cash' | 'Card' | 'UPI' | 'Bank' | 'Cheque';
+  receiptNumber?: string;
+  lateFee?: number;
+  installments?: FeeInstallment[];
 }
 export interface Expense {
   id?: string; autoId: string; category: string; amount: number; description: string;

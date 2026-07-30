@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiUpload, FiEye, FiSettings, FiPlus } from 'react-icons/fi';
+import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText, FiPrinter, FiMail, FiClock, FiAlertCircle } from 'react-icons/fi';
 import { Student, Fee, Expense, Employee } from './types';
 
 interface ModalProps {
@@ -51,12 +51,15 @@ interface ModalProps {
   feeForm: Fee;
   setFeeForm: React.Dispatch<React.SetStateAction<Fee>>;
   students: Student[];
+  fees: Fee[];
   selectedStudentForFee: string;
   feeClassFilter: string;
   setFeeClassFilter: (v: string) => void;
   setSelectedStudentForFee: (v: string) => void;
   handleStudentSelection: (id: string) => void;
   handleSaveFee: () => void;
+  handleSaveFeeAndPrint?: () => void;
+  handleSaveFeeAndEmail?: () => void;
 
   // Expense
   expenseForm: Expense;
@@ -81,9 +84,9 @@ interface ModalProps {
   schoolSettings: any;
   setSchoolSettings: React.Dispatch<React.SetStateAction<any>>;
 }
+const inputCls = "w-full p-2 bg-gray-800 rounded border border-gray-700 text-white text-sm focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 focus:outline-none transition";
 
-const inputCls = "w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white";
-const inputReadonly = "w-full p-3 bg-gray-700 rounded-lg border border-gray-600 text-white font-mono";
+const inputReadonly = "w-full p-2 bg-gray-700 rounded border border-gray-600 text-white font-mono text-sm";
 
 export const AppModals: React.FC<ModalProps> = (p) => {
   const [feeStudentSearch, setFeeStudentSearch] = React.useState('');
@@ -327,130 +330,88 @@ export const AppModals: React.FC<ModalProps> = (p) => {
   };
 
   const renderFeeForm = () => (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Filter by Class</label><select value={p.feeClassFilter} onChange={e => { p.setFeeClassFilter(e.target.value); p.setSelectedStudentForFee(''); p.setFeeForm(prev => ({ ...prev, studentId: '', studentName: '', originalAmount: 0, discountValue: 0, discountAmount: 0, amount: 0 } as any)); }} className={inputCls}><option value="">All Classes</option>{[...new Set(p.students.filter(s => s.status === 'ACTIVE').map(s => s.class))].filter(Boolean).sort().map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-        <div className="space-y-2 col-span-2">
-          <label className="text-xs text-cyan-400">Select Student</label>
-          <div className="bg-gray-800 rounded-lg border border-gray-700 p-3">
-            <input value={feeStudentSearch} onChange={e => setFeeStudentSearch(e.target.value)} placeholder="Search student by name, ID, roll, class..." className="w-full p-3 mb-3 bg-gray-900 rounded-lg border border-gray-700 text-white focus:border-cyan-500 focus:outline-none" />
-            <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+    <div className="space-y-2">
+      <div className="grid grid-cols-3 gap-x-3 gap-y-2">
+        <div className="col-span-3">
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] text-cyan-400 whitespace-nowrap">Class</label>
+            <select value={p.feeClassFilter} onChange={e => { p.setFeeClassFilter(e.target.value); p.setSelectedStudentForFee(''); p.setFeeForm(prev => ({ ...prev, studentId: '', studentName: '', originalAmount: 0, discountValue: 0, discountAmount: 0, amount: 0 } as any)); }} className="flex-1 p-1.5 bg-gray-800 rounded border border-gray-700 text-white text-xs"><option value="">All</option>{[...new Set(p.students.filter(s => s.status === 'ACTIVE').map(s => s.class))].filter(Boolean).sort().map(c => <option key={c} value={c}>{c}</option>)}</select>
+          </div>
+        </div>
+        <div className="col-span-3">
+          <label className="text-[11px] text-cyan-400">Student</label>
+          <div className="bg-gray-800/60 rounded border border-gray-700 p-1.5 mt-0.5">
+            <input value={feeStudentSearch} onChange={e => setFeeStudentSearch(e.target.value)} placeholder="Search name, ID, roll, class..." className="w-full p-1 mb-1.5 bg-gray-900 rounded border border-gray-700 text-white focus:border-cyan-500 focus:outline-none text-xs" />
+            <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
               {p.students.filter(s => s.status === 'ACTIVE').filter(s => !p.feeClassFilter || s.class === p.feeClassFilter).filter(s => { const q = feeStudentSearch.toLowerCase().trim(); if (!q) return true; return s.name.toLowerCase().includes(q) || s.autoId.toLowerCase().includes(q) || s.rollNumber.toLowerCase().includes(q) || s.class.toLowerCase().includes(q); }).sort((a, b) => a.class.localeCompare(b.class) || a.name.localeCompare(b.name)).map(s => {
                 const selected = p.selectedStudentForFee === s.id;
-                return <button type="button" key={s.id} onClick={() => p.handleStudentSelection(s.id!)} className={`w-full text-left p-3 rounded-lg border transition-all ${selected ? 'bg-cyan-500/20 border-cyan-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-cyan-500/50'}`}><div className="flex items-center justify-between gap-3"><div><p className="font-semibold">{s.name}</p><p className="text-xs text-cyan-400 font-mono">{s.class} | {s.autoId} | Roll: {s.rollNumber || '—'}</p></div><div className="text-right shrink-0"><p className="text-sm font-bold text-yellow-400">₹{(s.feeAmount || 0).toLocaleString()}</p>{selected && <p className="text-xs text-emerald-400">Selected</p>}</div></div></button>;
+                return <button type="button" key={s.id} onClick={() => p.handleStudentSelection(s.id!)} className={`w-full text-left px-2 py-1.5 rounded border transition-all text-xs ${selected ? 'bg-cyan-500/20 border-cyan-500 text-white' : 'bg-gray-900/60 border-gray-700 text-gray-300 hover:border-cyan-500/50'}`}><div className="flex items-center justify-between gap-2"><div><p className="font-semibold text-xs">{s.name}</p><p className="text-[10px] text-cyan-400/80 font-mono">{s.class} | {s.autoId} | Roll: {s.rollNumber || '—'}</p></div><div className="text-right shrink-0"><p className="text-xs font-bold text-yellow-400">₹{(s.feeAmount || 0).toLocaleString()}</p>{selected && <p className="text-[10px] text-emerald-400">Selected</p>}</div></div></button>;
               })}
-              {p.students.filter(s => s.status === 'ACTIVE').filter(s => !p.feeClassFilter || s.class === p.feeClassFilter).filter(s => { const q = feeStudentSearch.toLowerCase().trim(); if (!q) return true; return s.name.toLowerCase().includes(q) || s.autoId.toLowerCase().includes(q) || s.rollNumber.toLowerCase().includes(q) || s.class.toLowerCase().includes(q); }).length === 0 && <div className="p-4 text-center text-sm text-gray-500">No matching active students found.</div>}
+              {p.students.filter(s => s.status === 'ACTIVE').filter(s => !p.feeClassFilter || s.class === p.feeClassFilter).filter(s => { const q = feeStudentSearch.toLowerCase().trim(); if (!q) return true; return s.name.toLowerCase().includes(q) || s.autoId.toLowerCase().includes(q) || s.rollNumber.toLowerCase().includes(q) || s.class.toLowerCase().includes(q); }).length === 0 && <div className="p-3 text-center text-xs text-gray-500">No matching active students found.</div>}
             </div>
           </div>
         </div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Auto ID</label><input value={p.feeForm.autoId} readOnly className={inputReadonly} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Selected Student</label><input value={p.feeForm.studentName} readOnly className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 text-white" /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Student Auto ID</label><input value={p.feeForm.studentId} readOnly className={inputReadonly} /></div>
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Package Amount (₹)</label>
-          <input
-            type="number"
-            value={(p.feeForm as any).originalAmount || p.feeForm.amount || 0}
-            readOnly
-            className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 text-white font-bold"
-          />
-          <p className="text-xs text-gray-500">Fixed from selected student's package.</p>
+        <div className="col-span-3 flex items-end gap-3">
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Package (₹)</label>
+            <input type="number" value={(p.feeForm as any).originalAmount || p.feeForm.amount || 0} readOnly className="w-full p-2 bg-gray-700 rounded border border-gray-600 text-white font-bold text-sm" />
+          </div>
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Payment (₹)</label>
+            <input type="number" value={(p.feeForm as any).paymentAmount ?? p.feeForm.amount ?? ''} onChange={e => { const payableAmount = Number((p.feeForm as any).payableAmount ?? p.feeForm.amount ?? 0); const paymentAmount = Math.min(Math.max(parseFloat(e.target.value) || 0, 0), payableAmount); p.setFeeForm(prev => ({ ...prev, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(payableAmount - paymentAmount, 0), status: paymentAmount > 0 ? 'paid' : prev.status } as any)); }} className={inputCls} />
+          </div>
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Fee Type</label>
+            <input value={p.feeForm.type} onChange={e => p.setFeeForm({ ...p.feeForm, type: e.target.value })} className={inputCls} />
+          </div>
         </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Discount</label>
-          <label className="flex items-center gap-2 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white cursor-pointer">
-            <input
-              type="checkbox"
-              checked={Boolean((p.feeForm as any).applyDiscount)}
-              onChange={e => {
-                const applyDiscount = e.target.checked;
-                const originalAmount = (p.feeForm as any).originalAmount || 0;
-                const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent';
-                const discountValue = (p.feeForm as any).discountValue || 0;
-                const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, applyDiscount);
-                const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount);
-                const paymentAmount = Math.min(previousPayment, calculated.amount);
-                p.setFeeForm(prev => ({ ...prev, applyDiscount, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any));
-              }}
-              className="w-4 h-4 accent-cyan-500"
-            />
-            <span className="text-sm font-semibold">Apply Discount</span>
+        <div className="col-span-3 flex items-end gap-3">
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Balance (₹)</label>
+            <input type="number" value={(p.feeForm as any).balanceAmount ?? Math.max(Number((p.feeForm as any).payableAmount || 0) - Number((p.feeForm as any).paymentAmount || 0), 0)} readOnly className="w-full p-2 bg-gray-700 rounded border border-gray-600 text-orange-400 font-bold text-sm" />
+          </div>
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Due Date</label>
+            <input type="date" value={p.feeForm.dueDate} onChange={e => p.setFeeForm({ ...p.feeForm, dueDate: e.target.value })} className={inputCls} />
+          </div>
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Status</label>
+            <select value={p.feeForm.status} onChange={e => { const status = e.target.value as any; const originalAmount = (p.feeForm as any).originalAmount || 0; const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent'; const discountValue = (p.feeForm as any).discountValue || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount)); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = status === 'paid' && previousPayment <= 0 ? calculated.amount : Math.min(previousPayment, calculated.amount); p.setFeeForm({ ...p.feeForm, status, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any); }} className={inputCls}><option value="pending">Pending</option><option value="paid">Paid / Partial</option><option value="overdue">Overdue</option></select>
+          </div>
+        </div>
+        <div className="col-span-3 flex items-end gap-3">
+          <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Paid Date</label>
+            <input type="date" value={p.feeForm.paidDate} onChange={e => p.setFeeForm({ ...p.feeForm, paidDate: e.target.value })} className={inputCls} />
+          </div>
+          <label className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 rounded border border-gray-700 text-white cursor-pointer shrink-0">
+            <input type="checkbox" checked={Boolean((p.feeForm as any).applyDiscount)} onChange={e => { const applyDiscount = e.target.checked; const originalAmount = (p.feeForm as any).originalAmount || 0; const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent'; const discountValue = (p.feeForm as any).discountValue || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, applyDiscount); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = Math.min(previousPayment, calculated.amount); p.setFeeForm(prev => ({ ...prev, applyDiscount, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any)); }} className="w-3.5 h-3.5 accent-cyan-500" />
+            <span className="text-xs font-semibold whitespace-nowrap">Discount</span>
           </label>
         </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Discount Type</label>
-          <select
-            value={(p.feeForm as any).discountType || 'amount'}
-            disabled={!Boolean((p.feeForm as any).applyDiscount)}
-            onChange={e => {
-              const discountType = e.target.value as 'amount' | 'percent';
-              const originalAmount = (p.feeForm as any).originalAmount || 0;
-              const discountValue = (p.feeForm as any).discountValue || 0;
-              const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount));
-              const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount);
-              const paymentAmount = Math.min(previousPayment, calculated.amount);
-              p.setFeeForm(prev => ({ ...prev, discountType, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any));
-            }}
-            className={inputCls + (!Boolean((p.feeForm as any).applyDiscount) ? ' opacity-50' : '')}
-          >
-            <option value="amount">₹ Amount</option>
-            <option value="percent">% Percent</option>
-          </select>
+        {Boolean((p.feeForm as any).applyDiscount) && (
+          <div className="col-span-3 flex items-end gap-3">
+            <div className="flex-1 space-y-0.5">
+              <label className="text-[11px] text-cyan-400">Discount Type</label>
+              <select value={(p.feeForm as any).discountType || 'amount'} onChange={e => { const discountType = e.target.value as 'amount' | 'percent'; const originalAmount = (p.feeForm as any).originalAmount || 0; const discountValue = (p.feeForm as any).discountValue || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount)); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = Math.min(previousPayment, calculated.amount); p.setFeeForm(prev => ({ ...prev, discountType, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any)); }} className={inputCls}>
+                <option value="amount">₹ Amount</option>
+                <option value="percent">% Percent</option>
+              </select>
+            </div>
+            <div className="flex-1 space-y-0.5">
+              <label className="text-[11px] text-cyan-400">Discount {(p.feeForm as any).discountType === 'percent' ? '(%)' : '(₹)'}</label>
+              <input type="number" value={(p.feeForm as any).discountValue || ''} onChange={e => { const discountValue = parseFloat(e.target.value) || 0; const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent'; const originalAmount = (p.feeForm as any).originalAmount || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount)); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = Math.min(previousPayment, calculated.amount); p.setFeeForm(prev => ({ ...prev, discountValue, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any)); }} className={inputCls} />
+            </div>
+            <div className="flex-1" />
+          </div>
+        )}
+        <div className="space-y-0.5 col-span-3">
+          <label className="text-[11px] text-cyan-400">Description</label>
+          <input value={p.feeForm.description} onChange={e => p.setFeeForm({ ...p.feeForm, description: e.target.value })} className={inputCls} />
         </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Discount {(p.feeForm as any).discountType === 'percent' ? '(%)' : '(₹)'}</label>
-          <input
-            type="number"
-            value={(p.feeForm as any).discountValue || ''}
-            disabled={!Boolean((p.feeForm as any).applyDiscount)}
-            onChange={e => {
-              const discountValue = parseFloat(e.target.value) || 0;
-              const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent';
-              const originalAmount = (p.feeForm as any).originalAmount || 0;
-              const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount));
-              const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount);
-              const paymentAmount = Math.min(previousPayment, calculated.amount);
-              p.setFeeForm(prev => ({ ...prev, discountValue, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any));
-            }}
-            className={inputCls + (!Boolean((p.feeForm as any).applyDiscount) ? ' opacity-50' : '')}
-          />
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Final Payable (₹)</label>
-          <input type="number" value={(p.feeForm as any).payableAmount ?? p.feeForm.amount ?? 0} readOnly className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 text-yellow-400 font-bold" />
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Payment Amount (₹)</label>
-          <input
-            type="number"
-            value={(p.feeForm as any).paymentAmount ?? p.feeForm.amount ?? ''}
-            onChange={e => {
-              const payableAmount = Number((p.feeForm as any).payableAmount ?? p.feeForm.amount ?? 0);
-              const paymentAmount = Math.min(Math.max(parseFloat(e.target.value) || 0, 0), payableAmount);
-              p.setFeeForm(prev => ({ ...prev, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(payableAmount - paymentAmount, 0), status: paymentAmount > 0 ? 'paid' : prev.status } as any));
-            }}
-            className={inputCls}
-          />
-          <p className="text-xs text-gray-500">For partial payment, enter received amount. Example: ₹3,000 of ₹10,000.</p>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-cyan-400">Balance After Payment (₹)</label>
-          <input type="number" value={(p.feeForm as any).balanceAmount ?? Math.max(Number((p.feeForm as any).payableAmount || 0) - Number((p.feeForm as any).paymentAmount || 0), 0)} readOnly className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 text-orange-400 font-bold" />
-        </div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Fee Type</label><input value={p.feeForm.type} onChange={e => p.setFeeForm({ ...p.feeForm, type: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Due Date</label><input type="date" value={p.feeForm.dueDate} onChange={e => p.setFeeForm({ ...p.feeForm, dueDate: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Paid Date</label><input type="date" value={p.feeForm.paidDate} onChange={e => p.setFeeForm({ ...p.feeForm, paidDate: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Status</label><select value={p.feeForm.status} onChange={e => { const status = e.target.value as any; const originalAmount = (p.feeForm as any).originalAmount || 0; const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent'; const discountValue = (p.feeForm as any).discountValue || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount)); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = status === 'paid' && previousPayment <= 0 ? calculated.amount : Math.min(previousPayment, calculated.amount); p.setFeeForm({ ...p.feeForm, status, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any); }} className={inputCls}><option value="pending">Pending</option><option value="paid">Paid / Partial Payment</option><option value="overdue">Overdue</option></select></div>
-        <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Description</label><input value={p.feeForm.description} onChange={e => p.setFeeForm({ ...p.feeForm, description: e.target.value })} className={inputCls} /></div>
-        {renderBillUpload(p.feeForm.billUrl)}
+        <div className="space-y-0.5 col-span-3">{renderBillUpload(p.feeForm.billUrl)}</div>
       </div>
-      <button onClick={p.handleSaveFee} disabled={!p.feeForm.studentId} className={`w-full p-4 rounded-lg font-bold text-lg ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>{p.modalType === 'add' ? 'Add Fee' : 'Update Fee'}</button>
+      <button onClick={p.handleSaveFee} disabled={!p.feeForm.studentId} className={`w-full py-2.5 rounded-lg font-bold text-sm ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>{p.modalType === 'add' ? 'Add Fee' : 'Update Fee'}</button>
     </div>
   );
 
@@ -613,11 +574,11 @@ export const AppModals: React.FC<ModalProps> = (p) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#1E1E1E] rounded-2xl p-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-800 shadow-2xl">
-        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-800">
-          <h3 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">{p.modalTitle}</h3>
-          <button onClick={p.onClose} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={28} /></button>
+    <div className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${p.activeTab === 'fees' ? 'p-0' : 'p-4'}`}>
+      <div className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${p.activeTab === 'fees' ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
+        <div className={`flex justify-between items-center border-b border-gray-800 ${p.activeTab === 'fees' ? 'mb-3 pb-2' : 'mb-6 pb-4'}`}>
+          <h3 className={`font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent ${p.activeTab === 'fees' ? 'text-lg' : 'text-2xl'}`}>{p.modalTitle}</h3>
+          <button onClick={p.onClose} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={p.activeTab === 'fees' ? 20 : 28} /></button>
         </div>
         {renderContent()}
       </div>
