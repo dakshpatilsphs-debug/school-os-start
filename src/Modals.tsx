@@ -368,19 +368,11 @@ export const AppModals: React.FC<ModalProps> = (p) => {
             <input type="number" value={(p.feeForm as any).balanceAmount ?? Math.max(Number((p.feeForm as any).payableAmount || 0) - Number((p.feeForm as any).paymentAmount || 0), 0)} readOnly className="w-full p-2 bg-gray-700 rounded border border-gray-600 text-orange-400 font-bold text-sm" />
           </div>
           <div className="flex-1 space-y-0.5">
-            <label className="text-[11px] text-cyan-400">Due Date</label>
-            <input type="date" value={p.feeForm.dueDate} onChange={e => p.setFeeForm({ ...p.feeForm, dueDate: e.target.value })} className={inputCls} />
-          </div>
-          <div className="flex-1 space-y-0.5">
-            <label className="text-[11px] text-cyan-400">Status</label>
-            <select value={p.feeForm.status} onChange={e => { const status = e.target.value as any; const originalAmount = (p.feeForm as any).originalAmount || 0; const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent'; const discountValue = (p.feeForm as any).discountValue || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, Boolean((p.feeForm as any).applyDiscount)); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = status === 'paid' && previousPayment <= 0 ? calculated.amount : Math.min(previousPayment, calculated.amount); p.setFeeForm({ ...p.feeForm, status, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any); }} className={inputCls}><option value="pending">Pending</option><option value="paid">Paid / Partial</option><option value="overdue">Overdue</option></select>
-          </div>
-        </div>
-        <div className="col-span-3 flex items-end gap-3">
-          <div className="flex-1 space-y-0.5">
             <label className="text-[11px] text-cyan-400">Paid Date</label>
             <input type="date" value={p.feeForm.paidDate} onChange={e => p.setFeeForm({ ...p.feeForm, paidDate: e.target.value })} className={inputCls} />
           </div>
+        </div>
+        <div className="col-span-3 flex items-end gap-3">
           <label className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 rounded border border-gray-700 text-white cursor-pointer shrink-0">
             <input type="checkbox" checked={Boolean((p.feeForm as any).applyDiscount)} onChange={e => { const applyDiscount = e.target.checked; const originalAmount = (p.feeForm as any).originalAmount || 0; const discountType = ((p.feeForm as any).discountType || 'amount') as 'amount' | 'percent'; const discountValue = (p.feeForm as any).discountValue || 0; const calculated = calculateFeeDiscount(originalAmount, discountType, discountValue, applyDiscount); const previousPayment = Number((p.feeForm as any).paymentAmount ?? calculated.amount); const paymentAmount = Math.min(previousPayment, calculated.amount); p.setFeeForm(prev => ({ ...prev, applyDiscount, ...calculated, payableAmount: calculated.amount, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(calculated.amount - paymentAmount, 0) } as any)); }} className="w-3.5 h-3.5 accent-cyan-500" />
             <span className="text-xs font-semibold whitespace-nowrap">Discount</span>
@@ -406,7 +398,6 @@ export const AppModals: React.FC<ModalProps> = (p) => {
           <label className="text-[11px] text-cyan-400">Description</label>
           <input value={p.feeForm.description} onChange={e => p.setFeeForm({ ...p.feeForm, description: e.target.value })} className={inputCls} />
         </div>
-        <div className="space-y-0.5 col-span-3">{renderBillUpload(p.feeForm.billUrl)}</div>
       </div>
       <button onClick={p.handleSaveFee} disabled={!p.feeForm.studentId} className={`w-full py-2.5 rounded-lg font-bold text-sm ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>{p.modalType === 'add' ? 'Add Fee' : 'Update Fee'}</button>
     </div>

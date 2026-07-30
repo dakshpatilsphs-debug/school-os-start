@@ -162,7 +162,7 @@ const App: React.FC = () => {
   const [showAllExpenses, setShowAllExpenses] = useState(false);
   const [showAllEmployees, setShowAllEmployees] = useState(false);
 
-  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '' } as any);
+  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '' } as any);
   const [selectedStudentForFee, setSelectedStudentForFee] = useState('');
   const [feeClassFilter, setFeeClassFilter] = useState('');
 
@@ -838,7 +838,7 @@ const App: React.FC = () => {
       if (modalType === 'edit' && currentRecord?.id) await updateFee(currentRecord.id, final);
       else { const seq = await getNextSequentialId('fees'); final.autoId = 'FEE-' + String(seq).padStart(3, '0'); await addFee(final); }
       closeModal();
-      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '' } as any);
+      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '' } as any);
       setBillFile(null); setSelectedStudentForFee(''); setFeeClassFilter(''); await loadData(); showNotification('Fee saved successfully', 'success');
       return final;
     } catch (error) { showFirebaseError(error, 'Failed to save fee'); }
