@@ -61,13 +61,13 @@ export const updateStudent = async (id: string, data: any) => updateDoc(doc(db, 
 export const deleteStudent = async (id: string) => deleteDoc(doc(db, 'students', id));
 
 // ===== Fee Functions =====
-export const addFee = async (fee: any) => addDoc(collection(db, 'fees'), { ...fee, createdAt: Timestamp.now() });
+export const addFee = async (fee: any) => addDoc(collection(db, 'fees'), cleanData({ ...fee, createdAt: Timestamp.now() }));
 export const getFees = async () => {
   const q = query(collection(db, 'fees'), orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 };
-export const updateFee = async (id: string, data: any) => updateDoc(doc(db, 'fees', id), data);
+export const updateFee = async (id: string, data: any) => updateDoc(doc(db, 'fees', id), cleanData(data));
 export const deleteFee = async (id: string) => deleteDoc(doc(db, 'fees', id));
 
 // ===== Expense Functions =====

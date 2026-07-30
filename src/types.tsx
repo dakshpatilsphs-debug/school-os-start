@@ -11,13 +11,6 @@ export interface Student {
   discountAmount?: number;
   sortOrder?: number;
 }
-export interface FeeInstallment {
-  id: string;
-  dueDate: string;
-  amount: number;
-  paidDate?: string;
-  status: 'pending' | 'paid';
-}
 
 export interface Fee {
   id?: string; autoId: string; studentId: string; studentName: string; amount: number;
@@ -32,11 +25,6 @@ export interface Fee {
   payableAmount?: number;
   paymentAmount?: number;
   balanceAmount?: number;
-
-  paymentMode?: 'Cash' | 'Card' | 'UPI' | 'Bank' | 'Cheque';
-  receiptNumber?: string;
-  lateFee?: number;
-  installments?: FeeInstallment[];
 }
 export interface Expense {
   id?: string; autoId: string; category: string; amount: number; description: string;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText, FiPrinter, FiMail, FiClock, FiAlertCircle } from 'react-icons/fi';
+import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText } from 'react-icons/fi';
 import { Student, Fee, Expense, Employee } from './types';
 
 interface ModalProps {
@@ -51,15 +51,12 @@ interface ModalProps {
   feeForm: Fee;
   setFeeForm: React.Dispatch<React.SetStateAction<Fee>>;
   students: Student[];
-  fees: Fee[];
   selectedStudentForFee: string;
   feeClassFilter: string;
   setFeeClassFilter: (v: string) => void;
   setSelectedStudentForFee: (v: string) => void;
   handleStudentSelection: (id: string) => void;
   handleSaveFee: () => void;
-  handleSaveFeeAndPrint?: () => void;
-  handleSaveFeeAndEmail?: () => void;
 
   // Expense
   expenseForm: Expense;

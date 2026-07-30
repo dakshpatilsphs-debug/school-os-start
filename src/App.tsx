@@ -162,7 +162,7 @@ const App: React.FC = () => {
   const [showAllExpenses, setShowAllExpenses] = useState(false);
   const [showAllEmployees, setShowAllEmployees] = useState(false);
 
-  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '', paymentMode: undefined, receiptNumber: '', lateFee: 0, installments: undefined } as any);
+  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '' } as any);
   const [selectedStudentForFee, setSelectedStudentForFee] = useState('');
   const [feeClassFilter, setFeeClassFilter] = useState('');
 
@@ -833,34 +833,15 @@ const App: React.FC = () => {
       const payableAmount = calculated.amount;
       const paymentAmount = Math.min(Math.max(Number(final.paymentAmount ?? final.amount ?? payableAmount), 0), payableAmount);
       const balanceAmount = Math.max(payableAmount - paymentAmount, 0);
-      final = { ...final, discountType, discountValue, applyDiscount, ...calculated, originalAmount, payableAmount, paymentAmount, amount: paymentAmount, balanceAmount, status: paymentAmount > 0 ? 'paid' : final.status, lateFee: final.lateFee || 0 };
+      final = { ...final, discountType, discountValue, applyDiscount, ...calculated, originalAmount, payableAmount, paymentAmount, amount: paymentAmount, balanceAmount, status: paymentAmount > 0 ? 'paid' : final.status };
 
       if (modalType === 'edit' && currentRecord?.id) await updateFee(currentRecord.id, final);
       else { const seq = await getNextSequentialId('fees'); final.autoId = 'FEE-' + String(seq).padStart(3, '0'); await addFee(final); }
       closeModal();
-      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '', paymentMode: undefined, receiptNumber: '', lateFee: 0, installments: undefined } as any);
+      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'pending', description: '', billUrl: '' } as any);
       setBillFile(null); setSelectedStudentForFee(''); setFeeClassFilter(''); await loadData(); showNotification('Fee saved successfully', 'success');
       return final;
     } catch (error) { showFirebaseError(error, 'Failed to save fee'); }
-  };
-  const handleSaveFeeAndPrint = async () => {
-    const saved = await handleSaveFee();
-    if (saved) exportFeeInvoice(saved as Fee);
-  };
-  const handleSaveFeeAndEmail = async () => {
-    const saved = await handleSaveFee();
-    if (saved) {
-      const student = students.find(s => s.autoId === saved.studentId);
-      const subject = encodeURIComponent(`Fee Receipt - ${saved.type} - ${saved.autoId}`);
-      const body = encodeURIComponent(
-        `Dear ${student?.parentName || 'Parent'},\n\n` +
-        `Fee receipt for ${student?.name || saved.studentName}\n` +
-        `Type: ${saved.type}\nAmount: ₹${saved.amount.toLocaleString()}\n` +
-        `Status: ${saved.status}\nReceipt: ${saved.receiptNumber || saved.autoId}\n\n` +
-        `Thank you,\n${schoolSettings.schoolName || 'School OS'}`
-      );
-      window.open(`mailto:${student?.email || ''}?subject=${subject}&body=${body}`, '_blank');
-    }
   };
   const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); showNotification(`Selected: ${e.name}`, 'success'); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
   const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); } closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
@@ -3674,7 +3655,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} fees={fees} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} handleSaveFeeAndPrint={handleSaveFeeAndPrint} handleSaveFeeAndEmail={handleSaveFeeAndEmail} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
+      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
 
       <div className="fixed left-0 top-0 h-full w-72 bg-[#1E1E1E] border-r border-gray-800 p-6 flex flex-col z-40">
         <div className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-8 flex items-center gap-3 shrink-0">
