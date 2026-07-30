@@ -165,6 +165,7 @@ const App: React.FC = () => {
   const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '' } as any);
   const [selectedStudentForFee, setSelectedStudentForFee] = useState('');
   const [feeClassFilter, setFeeClassFilter] = useState('');
+  const [forceFeeForm, setForceFeeForm] = useState(false);
 
   const [expenseForm, setExpenseForm] = useState<Expense>({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' });
   const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
@@ -744,6 +745,7 @@ const App: React.FC = () => {
     resetModalSubViews();
     setCurrentRecord(null);
     setBillFile(null);
+    setForceFeeForm(false);
   }, [resetModalSubViews]);
 
   const handleSaveStudent = async () => {
@@ -819,6 +821,24 @@ const App: React.FC = () => {
       setFeeClassFilter(s.class || '');
       showNotification(`Selected: ${s.name} (${s.class})`, 'success');
     }
+  };
+  const handlePayStudent = (student: Student) => {
+    resetModalSubViews();
+    setBillFile(null);
+    setModalType('add');
+    setCurrentRecord(null);
+    setFeeForm({
+      autoId: generateAutoId('F'), studentId: student.autoId, studentName: student.name,
+      originalAmount: student.feeAmount || 0, applyDiscount: false, discountType: 'amount',
+      discountValue: 0, discountAmount: 0, payableAmount: student.feeAmount || 0,
+      paymentAmount: student.feeAmount || 0, balanceAmount: 0, amount: student.feeAmount || 0,
+      type: 'Tuition Fee', dueDate: '', paidDate: new Date().toISOString().split('T')[0],
+      status: 'paid', description: '', billUrl: ''
+    } as any);
+    setSelectedStudentForFee(student.id || '');
+    setFeeClassFilter(student.class || '');
+    setForceFeeForm(true);
+    setShowModal(true);
   };
   const handleSaveFee = async () => {
     if (!feeForm.studentId) { showNotification('Please select a student', 'error'); return; }
@@ -3655,7 +3675,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
+      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} forceFeeForm={forceFeeForm} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
 
       <div className="fixed left-0 top-0 h-full w-72 bg-[#1E1E1E] border-r border-gray-800 p-6 flex flex-col z-40">
         <div className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-8 flex items-center gap-3 shrink-0">
@@ -3758,7 +3778,7 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
-              <div className="overflow-x-auto"><table className="w-full">
+              <div className="overflow-x-auto"><table className="w-full min-w-max">
                 <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Roll</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Class</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Package</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Fee</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Parent</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
                 <tbody>
                   {students.filter(s => (!studentClassFilter || s.class === studentClassFilter) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || s.class.toLowerCase().includes(searchTerm.toLowerCase()))).slice(0, showAllStudents ? undefined : 5).map(s => (
@@ -3766,7 +3786,7 @@ const App: React.FC = () => {
                       <td className="px-6 py-4 font-mono text-cyan-400">{s.autoId}</td><td className="px-6 py-4 font-semibold">{s.name}</td><td className="px-6 py-4">{s.rollNumber}</td><td className="px-6 py-4">{s.class}</td>
                       <td className="px-6 py-4 hidden md:table-cell"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{s.package}</span></td><td className="px-6 py-4 font-semibold text-yellow-400">₹{(s.feeAmount || 0).toLocaleString()}</td><td className="px-6 py-4 text-gray-400 hidden lg:table-cell">{s.parentName}</td>
                       <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${s.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{s.status}</span></td>
-                      <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => exportStudentIDCard(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download ID Card"><FiFileText size={18} /></button><button onClick={() => openEditModal(s, 'student')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Student"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(s.id!, 'student')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Student"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                      <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => handlePayStudent(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Pay Fee"><FiDollarSign size={18} /></button><button onClick={() => exportStudentIDCard(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download ID Card"><FiFileText size={18} /></button><button onClick={() => openEditModal(s, 'student')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Student"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(s.id!, 'student')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Student"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                     </tr>
                   ))}
                 </tbody>

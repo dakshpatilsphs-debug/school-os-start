@@ -17,6 +17,7 @@ interface ModalProps {
   setShowOfferLetterSettings: (v: boolean) => void;
   setShowModal: (v: boolean) => void;
   activeTab: string;
+  forceFeeForm?: boolean;
   modalType: 'add' | 'edit';
   billFile: File | null;
   uploading: boolean;
@@ -348,6 +349,18 @@ export const AppModals: React.FC<ModalProps> = (p) => {
             </div>
           </div>
         </div>
+        {p.feeForm.studentId && p.feeForm.studentName && (
+          <div className="col-span-3 flex items-center gap-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg px-3 py-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-cyan-300 truncate">{p.feeForm.studentName}</p>
+              <p className="text-[10px] text-gray-400">{(() => { const s = p.students.find(x => x.id === p.selectedStudentForFee); return s ? `${s.class} | ${s.autoId} | Roll: ${s.rollNumber || '—'}` : ''; })()}</p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-xs font-bold text-yellow-400">₹{((p.feeForm as any).originalAmount || p.feeForm.amount || 0).toLocaleString()}</p>
+              <p className="text-[10px] text-emerald-400">Selected</p>
+            </div>
+          </div>
+        )}
         <div className="col-span-3 flex items-end gap-3">
           <div className="flex-1 space-y-0.5">
             <label className="text-[11px] text-cyan-400">Package (₹)</label>
@@ -552,6 +565,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
     if (p.showDocumentMgmt) return renderDocumentMgmt();
     if (p.showOfferLetterSettings) return renderOfferLetterSettings();
     if (p.showSettings) return renderSettings();
+    if (p.forceFeeForm) return renderFeeForm();
     switch (p.activeTab) {
       case 'students': return renderStudentForm();
       case 'fees': return renderFeeForm();
@@ -561,12 +575,14 @@ export const AppModals: React.FC<ModalProps> = (p) => {
     }
   };
 
+  const isFeeForm = p.activeTab === 'fees' || p.forceFeeForm;
+
   return (
-    <div className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${p.activeTab === 'fees' ? 'p-0' : 'p-4'}`}>
-      <div className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${p.activeTab === 'fees' ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
-        <div className={`flex justify-between items-center border-b border-gray-800 ${p.activeTab === 'fees' ? 'mb-3 pb-2' : 'mb-6 pb-4'}`}>
-          <h3 className={`font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent ${p.activeTab === 'fees' ? 'text-lg' : 'text-2xl'}`}>{p.modalTitle}</h3>
-          <button onClick={p.onClose} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={p.activeTab === 'fees' ? 20 : 28} /></button>
+    <div className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${isFeeForm ? 'p-0' : 'p-4'}`}>
+      <div className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${isFeeForm ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
+        <div className={`flex justify-between items-center border-b border-gray-800 ${isFeeForm ? 'mb-3 pb-2' : 'mb-6 pb-4'}`}>
+          <h3 className={`font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent ${isFeeForm ? 'text-lg' : 'text-2xl'}`}>{p.modalTitle}</h3>
+          <button onClick={p.onClose} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={isFeeForm ? 20 : 28} /></button>
         </div>
         {renderContent()}
       </div>
