@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   FiUsers, FiUser, FiDollarSign, FiTrendingDown, FiBarChart2, FiPlus, FiEdit2,
   FiTrash2, FiDownload, FiUpload, FiFileText, FiX, FiCheck, FiAlertCircle,
-  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu, FiSave
+  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu, FiSave, FiTag, FiMinus, FiSun, FiMoon
 } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -41,13 +41,15 @@ const getEmpClQuota = (emp?: Employee | null) => {
 };
 
 const getClMonthlyLimit = (emp: Employee | undefined | null) => {
-  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 1;
+  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 0;
 };
 
+// Per-month cap applies only to current/future months — old entries are never affected.
 const getMonthCap = (monthKey: string, monthLim: number, annualQuota: number) => {
   const now = new Date();
   const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  return monthKey < cur ? annualQuota : monthLim;
+  if (monthKey < cur) return annualQuota;
+  return monthLim > 0 ? monthLim : annualQuota;
 };
 
 const getAcademicYearStart = (monthKey: string) => {
@@ -57,8 +59,22 @@ const getAcademicYearStart = (monthKey: string) => {
   return `${startYear}-06`;
 };
 
-const getCLUsedBeforeMonth = (_empId: string, _monthKey: string, _allAttendance: Att[], _monthlyLimit: number, _annualQuota: number) => {
-  return 0;
+// CL is never refreshed monthly. Unused CL carries forward to the next month.
+// CL used before the given month = absences auto-covered by CL in all prior months of the academic year.
+const getCLUsedBeforeMonth = (empId: string, monthKey: string, allAttendance: Att[], _monthlyLimit: number, annualQuota: number) => {
+  const [y0, m0] = getAcademicYearStart(monthKey).split('-').map(Number);
+  const [y1, m1] = monthKey.split('-').map(Number);
+  let used = 0;
+  let y = y0, m = m0;
+  while (y < y1 || (y === y1 && m < m1)) {
+    const mk = `${y}-${String(m).padStart(2, '0')}`;
+    const absents = allAttendance.filter(a => a.personId === empId && a.date.startsWith(mk) && a.status === 'absent').length;
+    used += Math.min(absents, Math.max(0, annualQuota - used));
+    m++;
+    if (m > 12) { m = 1; y++; }
+    if (used >= annualQuota) break;
+  }
+  return used;
 };
 
 const App: React.FC = () => {
@@ -161,14 +177,22 @@ const App: React.FC = () => {
   const [showAllFeesByStudent, setShowAllFeesByStudent] = useState(false);
   const [showAllExpenses, setShowAllExpenses] = useState(false);
   const [showAllEmployees, setShowAllEmployees] = useState(false);
+  const [deductPopoverEmpId, setDeductPopoverEmpId] = useState('');
+  const [deductMonth, setDeductMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
+  const [deductAmount, setDeductAmount] = useState('');
+  const [uiTheme, setUiTheme] = useState<'blackblue' | 'wrb'>(() => (localStorage.getItem('uiTheme') === 'wrb' ? 'wrb' : 'blackblue'));
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', uiTheme);
+    localStorage.setItem('uiTheme', uiTheme);
+  }, [uiTheme]);
 
-  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '' } as any);
+  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '', secondaryAutoId: '' } as any);
   const [selectedStudentForFee, setSelectedStudentForFee] = useState('');
   const [feeClassFilter, setFeeClassFilter] = useState('');
   const [forceFeeForm, setForceFeeForm] = useState(false);
 
   const [expenseForm, setExpenseForm] = useState<Expense>({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' });
-  const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
+  const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '', otherDeduction: 0 } as any);
   const [equipmentForm, setEquipmentForm] = useState<Equipment>({ autoId: generateAutoId('Q'), name: '', category: 'Furniture', assignedToType: 'school', assignedToId: '', assignedToName: 'School', quantity: 1, condition: 'Good', purchaseDate: '', value: 0, status: 'Pending', notes: '' });
   const [equipmentPersonTypeFilter, setEquipmentPersonTypeFilter] = useState<'all' | 'student' | 'teacher'>('all');
   const [equipmentPersonIdFilter, setEquipmentPersonIdFilter] = useState('');
@@ -553,7 +577,7 @@ const App: React.FC = () => {
           autoTable(doc, {
             head: [['ID', 'Student Name', 'Roll', 'Package', 'Fee', 'Paid', 'Pending', 'Balance', 'Status']],
             body: cd.cActive.map(s => {
-              const sf = cd.classFees.filter(f => f.studentId === s.autoId);
+              const sf = cd.classFees.filter(f => f.studentId === s.autoId || (s.secondaryAutoId && f.secondaryAutoId === s.secondaryAutoId));
               const paid = sf.filter(f => f.status === 'paid').reduce((sum, f) => sum + f.amount, 0);
               const pend = sf.filter(f => f.status === 'pending').reduce((sum, f) => sum + f.amount, 0);
               const bal = (s.feeAmount || 0) - paid;
@@ -656,7 +680,7 @@ const App: React.FC = () => {
     // Package/target must ALWAYS come from the fee assigned in Student Add/Edit.
     // Fee records only represent collected payment entries. Discount is treated as waived amount
     // only when the fee record is marked paid, so discounted full-payment can still be 100% complete.
-    const sf = fees.filter(f => f.studentId === student.autoId);
+    const sf = fees.filter(f => f.studentId === student.autoId || (student.secondaryAutoId && f.secondaryAutoId === student.secondaryAutoId));
     const totalPackage = student.feeAmount || 0;
     const paidFees = sf.filter(f => getEffectiveFeeStatus(f) === 'paid');
     const overdueFees = sf.filter(f => getEffectiveFeeStatus(f) === 'overdue');
@@ -694,6 +718,19 @@ const App: React.FC = () => {
 
   // Auto ID is GLOBAL and sequential: STU-001, STU-002...
   const formatStudentAutoId = (num: number) => `STU-${String(num).padStart(3, '0')}`;
+
+  // Secondary Auto ID — stable link derived from student name + class + roll.
+  // Used by Fees & Billing to locate a student even if the primary AUTO ID changes.
+  const generateSecondaryStudentId = (name?: string, studentClass?: string, roll?: string) => {
+    const n = (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'STU';
+    const c = (studentClass || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    const r = (roll || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    return `S2-${n}-${c || 'NA'}-${r || 'NA'}`;
+  };
+
+  const findFeeStudent = (fee: Fee) =>
+    students.find(s => s.autoId === fee.studentId) ||
+    students.find(s => s.secondaryAutoId && s.secondaryAutoId === fee.secondaryAutoId);
 
   const getNextAvailableStudentAutoId = (sourceStudents: Student[] = students) => {
     const maxNum = sourceStudents
@@ -755,6 +792,7 @@ const App: React.FC = () => {
       if (modalType === 'edit' && currentRecord?.id) {
         // Auto ID is locked during edit to prevent mismatched references.
         final.autoId = currentRecord.autoId;
+        final.secondaryAutoId = generateSecondaryStudentId(final.name, final.class, final.rollNumber) || currentRecord.secondaryAutoId;
         await updateStudent(currentRecord.id, final);
       } else {
         const seq = await getNextSequentialId('students');
@@ -763,6 +801,7 @@ const App: React.FC = () => {
 
         final.autoId = autoId;
         final.rollNumber = rollNumber;
+        final.secondaryAutoId = generateSecondaryStudentId(final.name, final.class, rollNumber);
         await addStudent(final);
       }
 
@@ -815,7 +854,7 @@ const App: React.FC = () => {
         const discountValue = (prev as any).discountValue || 0;
         const applyDiscount = Boolean((prev as any).applyDiscount);
         const calculated = calculateFeeDiscountForForm(originalAmount, discountType, discountValue, applyDiscount);
-        return { ...prev, studentId: s.autoId, studentName: s.name, applyDiscount, ...calculated, payableAmount: calculated.amount, paymentAmount: calculated.amount, balanceAmount: 0 } as any;
+        return { ...prev, studentId: s.autoId, studentName: s.name, secondaryAutoId: s.secondaryAutoId || '', applyDiscount, ...calculated, payableAmount: calculated.amount, paymentAmount: calculated.amount, balanceAmount: 0 } as any;
       });
       setSelectedStudentForFee(id);
       setFeeClassFilter(s.class || '');
@@ -833,7 +872,7 @@ const App: React.FC = () => {
       discountValue: 0, discountAmount: 0, payableAmount: student.feeAmount || 0,
       paymentAmount: student.feeAmount || 0, balanceAmount: 0, amount: student.feeAmount || 0,
       type: 'Tuition Fee', dueDate: '', paidDate: new Date().toISOString().split('T')[0],
-      status: 'paid', description: '', billUrl: ''
+      status: 'paid', description: '', billUrl: '', secondaryAutoId: student.secondaryAutoId || ''
     } as any);
     setSelectedStudentForFee(student.id || '');
     setFeeClassFilter(student.class || '');
@@ -853,12 +892,12 @@ const App: React.FC = () => {
       const payableAmount = calculated.amount;
       const paymentAmount = Math.min(Math.max(Number(final.paymentAmount ?? final.amount ?? payableAmount), 0), payableAmount);
       const balanceAmount = Math.max(payableAmount - paymentAmount, 0);
-      final = { ...final, discountType, discountValue, applyDiscount, ...calculated, originalAmount, payableAmount, paymentAmount, amount: paymentAmount, balanceAmount, status: paymentAmount > 0 ? 'paid' : final.status };
+      final = { ...final, discountType, discountValue, applyDiscount, ...calculated, originalAmount, payableAmount, paymentAmount, amount: paymentAmount, balanceAmount, status: paymentAmount > 0 ? 'paid' : final.status, secondaryAutoId: selectedStudent?.secondaryAutoId || feeForm.secondaryAutoId || '' };
 
       if (modalType === 'edit' && currentRecord?.id) await updateFee(currentRecord.id, final);
       else { const seq = await getNextSequentialId('fees'); final.autoId = 'FEE-' + String(seq).padStart(3, '0'); await addFee(final); }
       closeModal();
-      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '' } as any);
+      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '', secondaryAutoId: '' } as any);
       setBillFile(null); setSelectedStudentForFee(''); setFeeClassFilter(''); await loadData(); showNotification('Fee saved successfully', 'success');
       return final;
     } catch (error) { showFirebaseError(error, 'Failed to save fee'); }
@@ -940,10 +979,29 @@ const App: React.FC = () => {
       if (modalType === 'edit' && currentRecord?.id) await updateEmployee(currentRecord.id, final);
       else { const seq = await getNextSequentialId('employees'); final.autoId = 'EMP-' + String(seq).padStart(3, '0'); await addEmployee(final); }
       closeModal();
-      setEmployeeForm({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, oldSalary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '' } as any);
+      setEmployeeForm({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, oldSalary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '', otherDeduction: 0 } as any);
       await loadData();
       showNotification('Employee saved successfully', 'success');
     } catch (error) { showFirebaseError(error, 'Failed to save employee'); }
+  };
+
+  const openDeductPopover = (emp: Employee) => {
+    const cur = emp.monthDeduction?.[deductMonth];
+    setDeductPopoverEmpId(emp.id || '');
+    setDeductAmount(cur != null ? String(cur) : String(emp.otherDeduction || ''));
+  };
+
+  const handleSaveMonthDeduction = async (emp: Employee) => {
+    if (!deductMonth) { showNotification('Select a month', 'error'); return; }
+    const amt = Math.max(0, parseFloat(deductAmount) || 0);
+    const current = emp.monthDeduction || {};
+    const updated: Record<string, number> = { ...current, [deductMonth]: amt };
+    setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, monthDeduction: updated } : x));
+    setDeductPopoverEmpId('');
+    try {
+      if (emp.id) await updateEmployee(emp.id, { monthDeduction: updated });
+      showNotification(`${emp.name}: deduction ₹${amt.toLocaleString()} for ${deductMonth}`, 'success');
+    } catch (error) { showFirebaseError(error, 'Failed to update deduction'); }
   };
 
 
@@ -1342,11 +1400,12 @@ const App: React.FC = () => {
         ['Travelling Allowance', 'Rs 0'],
         ['Medical Allowance', 'Rs 0'],
       ];
+      const otherDed = sd ? (sd.salary.deductions || 0) : ((emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0);
       const deductItems: [string, string][] = [
         ['EPF(%)', 'Rs 0'],
         ['PF(%)', 'Rs 0'],
         ['TDS', 'Rs 0'],
-        ['Others(-)', 'Rs 0'],
+        ['Others(-)', money(otherDed)],
         ['PTAX', 'Rs 0'],
       ];
       const itemCount = Math.max(earnItems.length, deductItems.length);
@@ -1410,7 +1469,7 @@ const App: React.FC = () => {
       doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
       doc.text('Gross Deductions (B)', sumTableX + padLg, ss);
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
-      doc.text('Rs 0', valX, ss, { align: 'right' });
+      doc.text(money(otherDed), valX, ss, { align: 'right' });
       ss += padSm;
 
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -1420,7 +1479,7 @@ const App: React.FC = () => {
       doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
       doc.text('Net Pay (A-B)', sumTableX + padLg, ss + 7);
       doc.setFontSize(13); doc.setTextColor(...sPrimaryDark);
-      doc.text(money(earnedSalary), valX, ss + 7, { align: 'right' });
+      doc.text(money(earnedSalary - otherDed), valX, ss + 7, { align: 'right' });
 
       // ============ 5. FOOTER ============
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -1518,7 +1577,7 @@ const App: React.FC = () => {
         perDaySalary: Math.round(perDaySalary),
         earnedSalary: effectiveEarnedSalary,
         allowances: 0,
-        deductions: 0,
+        deductions: (emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0,
       },
       payPeriod: monthName,
     };
@@ -2124,7 +2183,7 @@ const App: React.FC = () => {
     doc.text('FEES COLLECTED BY STUDENT', ML + 2, y + 3);
     y += 9;
 
-    const paidStudents = activeStudents.filter(s => paidFees.some(f => f.studentId === s.autoId));
+    const paidStudents = activeStudents.filter(s => paidFees.some(f => f.studentId === s.autoId || (s.secondaryAutoId && f.secondaryAutoId === s.secondaryAutoId)));
     const allClasses = [...new Set(paidStudents.filter(s => s.class).map(s => s.class))].sort();
     const rowH = 6.5;
 
@@ -2161,7 +2220,7 @@ const App: React.FC = () => {
       doc.setFontSize(7); doc.setFont('helvetica', 'normal');
       clsStudents.forEach((st, si) => {
         needPage(rowH + 2);
-        const stPaid = clsPaidFees.filter(f => f.studentId === st.autoId).reduce((s, f) => s + (f.amount || 0), 0);
+        const stPaid = clsPaidFees.filter(f => f.studentId === st.autoId || (st.secondaryAutoId && f.secondaryAutoId === st.secondaryAutoId)).reduce((s, f) => s + (f.amount || 0), 0);
         if (si % 2 === 0) { doc.setFillColor(252, 252, 252); doc.rect(ML, y, CW, rowH, 'F'); }
         doc.setTextColor(...sText);
         doc.text(st.name, ML + 2, y + 4.5);
@@ -2330,7 +2389,7 @@ const App: React.FC = () => {
 
     activeStudents.forEach((student, idx) => {
       if (idx > 0) doc.addPage();
-      const studentFees = fees.filter(f => f.studentId === student.autoId);
+      const studentFees = fees.filter(f => f.studentId === student.autoId || (student.secondaryAutoId && f.secondaryAutoId === student.secondaryAutoId));
       const info = getStudentPaymentInfo(student);
 
       // ── School Header ──
@@ -2528,7 +2587,7 @@ const App: React.FC = () => {
   };
 
   const exportFeeInvoice = (fee: Fee) => {
-    const student = students.find(s => s.autoId === fee.studentId);
+    const student = findFeeStudent(fee);
     if (!student) { showNotification('Student not found', 'error'); return; }
 
     const doc = new jsPDF('p', 'mm', [148, 210]);
@@ -2844,7 +2903,7 @@ const App: React.FC = () => {
 
       // Fee records store studentId as the student's autoId.
       // The dropdown value uses the student's Firestore document id.
-      const linkedStudent = students.find(s => s.autoId === record.studentId);
+      const linkedStudent = findFeeStudent(record);
 
       setSelectedStudentForFee(linkedStudent?.id || '');
       setFeeClassFilter(linkedStudent?.class || '');
@@ -3428,6 +3487,7 @@ const App: React.FC = () => {
                 status: safeStr(row, 'Status').toUpperCase() || 'ACTIVE',
                 package: resolvedPackage,
                 feeAmount: resolvedAmount,
+                secondaryAutoId: generateSecondaryStudentId(safeStr(row, 'Name', 'Student Name').toUpperCase(), studentClass, syncedRoll),
               });
               if (!record.name) { failed++; errors.push(`Row ${i + 1}: Missing name`); setImportProgress(p => ({ ...p, failed })); continue; }
               await addStudent(record);
@@ -3442,6 +3502,7 @@ const App: React.FC = () => {
                 paidDate: safeStr(row, 'Paid Date'),
                 status: safeStr(row, 'Status').toLowerCase() || 'pending',
                 description: safeStr(row, 'Description'),
+                secondaryAutoId: safeStr(row, 'Secondary ID'),
               });
               if (!record.studentId && !record.studentName) { failed++; errors.push(`Row ${i + 1}: Missing student`); setImportProgress(p => ({ ...p, failed })); continue; }
               await addFee(record);
@@ -3700,6 +3761,7 @@ const App: React.FC = () => {
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
+            <button onClick={() => setUiTheme(uiTheme === 'blackblue' ? 'wrb' : 'blackblue')} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-4 py-2 rounded-xl transition-all text-white font-semibold shadow-lg shadow-cyan-500/20" title="Switch UI colour theme">{uiTheme === 'blackblue' ? <FiSun size={18} /> : <FiMoon size={18} />}{uiTheme === 'blackblue' ? 'White Red Blue' : 'Black Blue'}</button>
             <button onClick={handleRefresh} disabled={refreshing} className="p-3 bg-[#1E1E1E] border border-gray-800 rounded-xl hover:border-cyan-500/50 transition-all disabled:opacity-50" title="Refresh"><FiRefreshCw size={20} className={refreshing ? 'animate-spin' : ''} /></button>
             <button onClick={exportFullReportPDF} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-4 py-2 rounded-xl transition-all text-white font-semibold shadow-lg shadow-cyan-500/20" title="Export complete report"><FiFileText size={18} />Full Report</button>
             {!isReadOnly && (
@@ -3814,7 +3876,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-max">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Type</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Description</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Due Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
-              <tbody>{fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).slice(0, showAllFees ? undefined : 5).map(f => (
+              <tbody>{fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).slice(0, showAllFees ? undefined : 5).map(f => (
                   <tr key={f.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                     <td className="px-6 py-4 font-mono text-cyan-400">{f.autoId}</td><td className="px-6 py-4 font-semibold">{f.studentName}</td><td className="px-6 py-4 font-semibold">₹{f.amount.toLocaleString()}</td><td className="px-6 py-4">{f.type}</td><td className="px-6 py-4 text-gray-400">{f.description || '-'}</td><td className="px-6 py-4 text-gray-400">{f.dueDate || '-'}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${getEffectiveFeeStatus(f) === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : getEffectiveFeeStatus(f) === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{getEffectiveFeeStatus(f)}</span></td>
@@ -3823,7 +3885,7 @@ const App: React.FC = () => {
                 </tr>
               ))}</tbody>
             </table></div></div>
-            {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFees ? 'Showing all' : `Showing 5 of ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).length}`}</p><button onClick={() => setShowAllFees(!showAllFees)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFees ? 'Show Less' : `View All ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId); return student?.class === studentClassFilter; }).length}`}</button></div>}
+            {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFees ? 'Showing all' : `Showing 5 of ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length}`}</p><button onClick={() => setShowAllFees(!showAllFees)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFees ? 'Show Less' : `View All ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length}`}</button></div>}
           </div>
         )}
 
@@ -3831,7 +3893,7 @@ const App: React.FC = () => {
           <div className="space-y-6">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Target</p><p className="text-xl font-bold text-cyan-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Collected</p><p className="text-xl font-bold text-emerald-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Collected</p><p className="text-xl font-bold text-emerald-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-xl font-bold text-yellow-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + getStudentPaymentInfo(s).balance, 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-xl font-bold text-red-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + getStudentPaymentInfo(s).totalOverdue, 0).toLocaleString()}</p></div>
             </div>
@@ -3879,12 +3941,31 @@ const App: React.FC = () => {
               <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(employees, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
-              <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
+              <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Other Deduction</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
               <tbody>{employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllEmployees ? undefined : 5).map(e => {
                 const ei = getEmployeeExpenseInfo(e);
                 return (<tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4 font-semibold">{e.name}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{e.role}</span></td><td className="px-6 py-4 hidden xl:table-cell text-gray-400">{e.department || '—'}</td>
-                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{(e.salary || 0).toLocaleString()}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.phone}</td>
+                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{(e.salary || 0).toLocaleString()}</td>
+                  <td className="px-6 py-4">
+                    <div className="relative flex items-center gap-2">
+                      <button onClick={() => { if (deductPopoverEmpId === e.id) { setDeductPopoverEmpId(''); return; } openDeductPopover(e); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition" title="Add/Edit monthly deduction"> <FiMinus size={13} /> Deduct</button>
+                      {(e.otherDeduction || 0) > 0 && <span className="text-xs text-red-400 whitespace-nowrap">₹{(e.otherDeduction || 0).toLocaleString()}/mo</span>}
+                      {deductPopoverEmpId === e.id && (
+                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[240px] space-y-2">
+                          <label className="text-xs text-cyan-400">Month</label>
+                          <select value={deductMonth} onChange={ev => { setDeductMonth(ev.target.value); const cur = e.monthDeduction?.[ev.target.value]; setDeductAmount(cur != null ? String(cur) : String(e.otherDeduction || '')); }} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm">{[...Array(12)].map((_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mn = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); return <option key={v} value={v}>{mn}</option>; })}</select>
+                          <label className="text-xs text-cyan-400">Amount (₹)</label>
+                          <input type="number" min={0} placeholder="Deduction amount" value={deductAmount} onChange={ev => setDeductAmount(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm" />
+                          <div className="flex gap-2 pt-1">
+                            <button onClick={() => handleSaveMonthDeduction(e)} className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-semibold">Save</button>
+                            <button onClick={() => setDeductPopoverEmpId('')} className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs">Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.phone}</td>
                   <td className="px-6 py-4 hidden lg:table-cell"><span className="text-emerald-400 font-semibold">₹{ei.totalPaid.toLocaleString()}</span><p className="text-xs text-gray-400">{ei.expenseCount} expenses</p></td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${e.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{e.status}</span></td>
                   <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'employee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit employee"><FiEdit2 size={18} /></button><button onClick={() => exportEmployeeSalarySlip(e)} className="text-yellow-400 hover:text-yellow-300 p-1 hover:bg-yellow-500/20 rounded" title="Download Salary Slip"><FiDollarSign size={18} /></button><button onClick={() => exportEmployeeOfferPDF(e)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Offer PDF"><FiFileText size={18} /></button><button onClick={() => handleDelete(e.id!, 'employee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete employee"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
@@ -4393,6 +4474,8 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
   const [filterClass, setFilterClass] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [saveProgress, setSaveProgress] = useState<{ current: number; total: number } | null>(null);
+  const [secondarySaving, setSecondarySaving] = useState(false);
 
   const getSource = () => {
     switch (entityType) {
@@ -4533,6 +4616,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
     }
 
     setSaving(true);
+    setSaveProgress({ current: 0, total: items.length });
     let success = 0;
 
     for (let i = 0; i < items.length; i++) {
@@ -4540,7 +4624,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       if (!item.firestoreId) continue;
       try {
         if (entityType === 'students') {
-          const updates: any = { autoId: item.autoId, sortOrder: i };
+          const updates: any = { autoId: item.autoId, sortOrder: i, secondaryAutoId: generateSecondaryStudentId(item.name, item.class, item.rollNumber) };
           if (item.class !== item._oldClass) updates.class = item.class;
           if (item.rollNumber !== item._oldRoll) updates.rollNumber = item.rollNumber;
           await updateStudent(item.firestoreId, updates);
@@ -4557,12 +4641,40 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       } catch (e) {
         showNotification(`Failed to update ${item.name}: ${e}`, 'error');
       }
+      setSaveProgress({ current: i + 1, total: items.length });
     }
     setSaving(false);
+    setSaveProgress(null);
 
     if (success > 0) {
       setDirty(false);
       showNotification(`${success} record(s) updated`, 'success');
+      await loadData();
+    }
+  };
+
+  const assignSecondaryIds = async () => {
+    if (isReadOnly) return showNotification('Read-only mode: cannot save', 'error');
+    if (entityType !== 'students') return;
+    setSecondarySaving(true);
+    setSaveProgress({ current: 0, total: students.length });
+    let success = 0;
+    for (let i = 0; i < students.length; i++) {
+      const s = students[i];
+      if (!s.id) { setSaveProgress({ current: i + 1, total: students.length }); continue; }
+      try {
+        await updateStudent(s.id, { secondaryAutoId: generateSecondaryStudentId(s.name, s.class, s.rollNumber) });
+        success++;
+      } catch (e) {
+        showNotification(`Failed to update ${s.name}: ${e}`, 'error');
+      }
+      setSaveProgress({ current: i + 1, total: students.length });
+    }
+    setSecondarySaving(false);
+    setSaveProgress(null);
+    if (success > 0) {
+      setDirty(false);
+      showNotification(`Secondary IDs assigned to ${success} student(s)`, 'success');
       await loadData();
     }
   };
@@ -4583,37 +4695,52 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
             <option value="equipments">Equipments</option>
           </select>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-stretch">
           <button onClick={autoResequence}
-            className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20">
+            className="btnCorrection bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 shadow-cyan-500/20">
             <FiRefreshCw size={16} />Auto Re-sequence
           </button>
           <button onClick={sortByAutoId}
-            className="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-pink-500/20">
+            className="btnCorrection bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 shadow-pink-500/20">
             <FiArrowUp size={16} />Sort by AUTO ID
           </button>
           {selectedIds.size > 0 && (
             <button onClick={assignToSelected}
-              className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-purple-500/20">
+              className="btnCorrection bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 shadow-purple-500/20">
               <FiCheck size={16} />Assign ({selectedIds.size})
             </button>
           )}
           {entityType === 'students' && (
             <button onClick={autoRollByClass}
-              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-amber-500/20">
+              className="btnCorrection bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-amber-500/20">
               <FiRefreshCw size={16} />Auto Roll No by Class
             </button>
           )}
+          {entityType === 'students' && (
+            <button onClick={assignSecondaryIds} disabled={secondarySaving || isReadOnly}
+              className="btnCorrection bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+              <FiTag size={16} />{secondarySaving ? 'Assigning...' : 'Assign Secondary IDs'}
+            </button>
+          )}
           <button onClick={saveAll} disabled={!dirty || saving || isReadOnly}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold shadow-lg transition-all ${
+            className={`btnCorrection transition-all ${
               dirty && !saving && !isReadOnly
-                ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white shadow-emerald-500/20'
+                ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-emerald-500/20'
                 : 'bg-gray-700 text-gray-400 cursor-not-allowed'
             }`}>
             <FiCheck size={16} />{saving ? 'Saving...' : 'Save All Changes'}
           </button>
         </div>
       </div>
+
+      {saveProgress && (
+        <div className="flex items-center gap-3 p-3 bg-[#1E1E1E] border border-gray-800 rounded-xl">
+          <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div className="h-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-300" style={{ width: `${saveProgress.total > 0 ? (saveProgress.current / saveProgress.total) * 100 : 0}%` }}></div>
+          </div>
+          <span className="text-xs text-gray-400 whitespace-nowrap">{secondarySaving ? 'Assigning secondary IDs' : 'Saving'}... {saveProgress.current}/{saveProgress.total}</span>
+        </div>
+      )}
 
       <div className="flex items-center gap-3 text-sm flex-wrap">
         <span className="text-gray-400">{items.length} record(s)</span>

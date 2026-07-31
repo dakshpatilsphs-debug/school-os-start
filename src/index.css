@@ -22,3 +22,131 @@
 *::-webkit-scrollbar-thumb:hover {
   background-color: #4b5563;
 }
+
+.btnCorrection {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  white-space: nowrap;
+  min-width: 8.5rem;
+}
+
+/* ============================================================
+   THEME: WHITE RED BLUE (premium / elegant)
+   Porcelain surfaces, deep crimson + royal-blue accents,
+   soft layered shadows and subtle background glows
+   ============================================================ */
+[data-theme="wrb"] {
+  scrollbar-color: #c7d0dd transparent;
+}
+[data-theme="wrb"] * {
+  scrollbar-color: #c7d0dd transparent;
+}
+[data-theme="wrb"] *::-webkit-scrollbar-thumb {
+  background-color: #c7d0dd;
+}
+[data-theme="wrb"] *::-webkit-scrollbar-thumb:hover {
+  background-color: #aab6c6;
+}
+
+/* App background: soft porcelain with faint red/blue glows */
+[data-theme="wrb"] .bg-\[\#121212\] {
+  background-color: #f3f6fb;
+  background-image:
+    radial-gradient(900px 520px at 12% -6%, rgb(37 99 235 / 0.07), transparent 62%),
+    radial-gradient(820px 500px at 96% 2%, rgb(220 38 38 / 0.05), transparent 56%);
+}
+
+/* Cards, panels, sidebar: crisp white with a soft layered shadow */
+[data-theme="wrb"] .bg-\[\#1E1E1E\] {
+  background-color: #ffffff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 14px 36px -20px rgb(15 23 42 / 0.14);
+}
+
+/* Inputs and recessed surfaces */
+[data-theme="wrb"] .bg-gray-900 { background-color: #f2f5f9; }
+[data-theme="wrb"] .bg-gray-800 { background-color: #f2f5f9; }
+[data-theme="wrb"] .bg-gray-800\/80 { background-color: rgb(226 232 240 / 0.85); }
+[data-theme="wrb"] .bg-gray-800\/70 { background-color: rgb(226 232 240 / 0.75); }
+[data-theme="wrb"] .bg-gray-800\/60 { background-color: rgb(226 232 240 / 0.65); }
+[data-theme="wrb"] .bg-gray-800\/50 { background-color: rgb(241 245 249 / 0.7); }
+[data-theme="wrb"] .bg-gray-800\/30 { background-color: rgb(241 245 249 / 0.5); }
+[data-theme="wrb"] .bg-gray-700 { background-color: #e8edf4; }
+[data-theme="wrb"] .bg-gray-700\/30 { background-color: rgb(226 232 240 / 0.55); }
+[data-theme="wrb"] .bg-gray-600 { background-color: #cbd5e1; }
+[data-theme="wrb"] .bg-gray-500\/20 { background-color: rgb(100 116 139 / 0.15); }
+
+/* Ink text */
+[data-theme="wrb"] .text-white { color: #0f172a; }
+[data-theme="wrb"] .text-gray-100 { color: #1e293b; }
+[data-theme="wrb"] .text-gray-200 { color: #334155; }
+[data-theme="wrb"] .text-gray-300 { color: #475569; }
+[data-theme="wrb"] .text-gray-400 { color: #5b6b82; }
+[data-theme="wrb"] .text-gray-500 { color: #5b6b82; }
+[data-theme="wrb"] .text-gray-600 { color: #334155; }
+
+/* Hairline borders with a cool blue undertone */
+[data-theme="wrb"] .border-gray-800 { border-color: #e3e9f2; }
+[data-theme="wrb"] .border-gray-700 { border-color: #d7dfea; }
+[data-theme="wrb"] .border-gray-700\/30 { border-color: rgb(215 223 234 / 0.5); }
+[data-theme="wrb"] .border-gray-600 { border-color: #cbd5e1; }
+
+/* Blue accent (labels, links, borders, focus) */
+[data-theme="wrb"] .text-cyan-400 { color: #1d4ed8; }
+[data-theme="wrb"] .text-cyan-400\/80 { color: rgb(29 78 216 / 0.8); }
+[data-theme="wrb"] .text-cyan-400\/50 { color: rgb(29 78 216 / 0.5); }
+[data-theme="wrb"] .text-cyan-300 { color: #3b82f6; }
+[data-theme="wrb"] .border-cyan-500 { border-color: #3b82f6; }
+[data-theme="wrb"] .border-cyan-500\/60 { border-color: rgb(37 99 235 / 0.6); }
+[data-theme="wrb"] .border-cyan-500\/50 { border-color: rgb(37 99 235 / 0.5); }
+[data-theme="wrb"] .border-cyan-500\/40 { border-color: rgb(37 99 235 / 0.4); }
+[data-theme="wrb"] .border-cyan-500\/30 { border-color: rgb(37 99 235 / 0.3); }
+[data-theme="wrb"] .border-cyan-500\/20 { border-color: rgb(37 99 235 / 0.2); }
+[data-theme="wrb"] .bg-cyan-500 { background-color: #2563eb; }
+[data-theme="wrb"] .bg-cyan-600 { background-color: #1d4ed8; }
+[data-theme="wrb"] .bg-cyan-700 { background-color: #1e40af; }
+[data-theme="wrb"] .bg-cyan-400 { background-color: #3b82f6; }
+[data-theme="wrb"] .bg-cyan-500\/30 { background-color: rgb(37 99 235 / 0.22); }
+[data-theme="wrb"] .bg-cyan-500\/20 { background-color: rgb(37 99 235 / 0.13); }
+[data-theme="wrb"] .bg-cyan-500\/10 { background-color: rgb(37 99 235 / 0.09); }
+[data-theme="wrb"] .bg-cyan-500\/5 { background-color: rgb(37 99 235 / 0.05); }
+[data-theme="wrb"] .accent-cyan-500 { accent-color: #2563eb; }
+[data-theme="wrb"] .ring-cyan-500 { --tw-ring-color: #3b82f6; }
+[data-theme="wrb"] .ring-cyan-500\/50 { --tw-ring-color: rgb(59 130 246 / 0.5); }
+
+/* Premium shadows take a cool blue tone */
+[data-theme="wrb"] .shadow-cyan-500\/20 { --tw-shadow-color: rgb(30 64 175 / 0.18); }
+[data-theme="wrb"] .shadow-cyan-500\/30 { --tw-shadow-color: rgb(37 99 235 / 0.22); }
+[data-theme="wrb"] .shadow-cyan-400\/50 { --tw-shadow-color: rgb(59 130 246 / 0.28); }
+
+/* Primary button gradients: crimson -> royal blue */
+[data-theme="wrb"] .from-cyan-500 { --tw-gradient-from: #dc2626; }
+[data-theme="wrb"] .from-cyan-500 { --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+[data-theme="wrb"] .from-cyan-600 { --tw-gradient-from: #b91c1c; }
+[data-theme="wrb"] .from-cyan-600 { --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+[data-theme="wrb"] .from-cyan-400 { --tw-gradient-from: #ef4444; }
+[data-theme="wrb"] .from-cyan-400 { --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+[data-theme="wrb"] .from-cyan-500\/20 { --tw-gradient-from: rgb(220 38 38 / 0.18); }
+[data-theme="wrb"] .from-cyan-500\/20 { --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+[data-theme="wrb"] .from-cyan-500\/10 { --tw-gradient-from: rgb(220 38 38 / 0.1); }
+[data-theme="wrb"] .from-cyan-500\/10 { --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+[data-theme="wrb"] .to-blue-500 { --tw-gradient-to: #2563eb; }
+[data-theme="wrb"] .to-blue-600 { --tw-gradient-to: #1d4ed8; }
+[data-theme="wrb"] .to-blue-400 { --tw-gradient-to: #60a5fa; }
+[data-theme="wrb"] .to-blue-500\/20 { --tw-gradient-to: rgb(37 99 235 / 0.2); }
+
+/* Page title + logo brand gradient: deep crimson -> royal blue */
+[data-theme="wrb"] .from-white { --tw-gradient-from: #be123c; }
+[data-theme="wrb"] .from-white { --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+[data-theme="wrb"] .to-gray-400 { --tw-gradient-to: #1e40af; }
+
+/* Solid primary buttons keep white labels on the red/blue gradient */
+[data-theme="wrb"] .from-cyan-500, [data-theme="wrb"] .from-cyan-600 { color: #ffffff; }

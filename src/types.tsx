@@ -10,6 +10,7 @@ export interface Student {
   discountValue?: number;
   discountAmount?: number;
   sortOrder?: number;
+  secondaryAutoId?: string;
 }
 
 export interface Fee {
@@ -25,6 +26,7 @@ export interface Fee {
   payableAmount?: number;
   paymentAmount?: number;
   balanceAmount?: number;
+  secondaryAutoId?: string;
 }
 export interface Expense {
   id?: string; autoId: string; category: string; amount: number; description: string;
@@ -52,6 +54,8 @@ export interface Employee {
   inactiveDate?: string;
   clQuota?: number;
   clAllowance?: number;
+  otherDeduction?: number;
+  monthDeduction?: Record<string, number>;
 
 }
 export interface CausalLeave { id?: string; employeeId: string; date: string; reason: string; }

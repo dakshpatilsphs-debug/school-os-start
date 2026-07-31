@@ -51,21 +51,35 @@ const getEmpClQuota = (emp?: Employee | null) => {
   return emp?.clQuota && emp.clQuota > 0 ? emp.clQuota : global;
 };
 
-// Get max CL days allowed per month for an employee
+// Get max CL days allowed per month for an employee (0 = unlimited carry-forward)
 const getClMonthlyLimit = (emp: Employee | undefined | null) => {
-  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 1;
+  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 0;
 };
 
-// Only apply monthly cap for current/future months; past months are unaffected
+// Per-month cap applies only to current/future months — old entries are never affected.
 const getMonthCap = (monthKey: string, monthLim: number, annualQuota: number) => {
   const now = new Date();
   const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  return monthKey < cur ? annualQuota : monthLim;
+  if (monthKey < cur) return annualQuota;
+  return monthLim > 0 ? monthLim : annualQuota;
 };
 
-// CL monthly limit applies only from current month onwards; old entries are untouched.
-const getCLUsedBeforeMonth = (_empId: string, _monthKey: string, _allAttendance: Att[], _monthlyLimit: number, _annualQuota: number) => {
-  return 0;
+// CL is never refreshed monthly. Unused CL carries forward to the next month.
+// CL used before the given month = absences auto-covered by CL in all prior months of the academic year.
+const getCLUsedBeforeMonth = (empId: string, monthKey: string, allAttendance: Att[], _monthlyLimit: number, annualQuota: number) => {
+  const [y0, m0] = getAcademicYearStart(monthKey).split('-').map(Number);
+  const [y1, m1] = monthKey.split('-').map(Number);
+  let used = 0;
+  let y = y0, m = m0;
+  while (y < y1 || (y === y1 && m < m1)) {
+    const mk = `${y}-${String(m).padStart(2, '0')}`;
+    const absents = allAttendance.filter(a => a.personId === empId && a.date.startsWith(mk) && a.status === 'absent').length;
+    used += Math.min(absents, Math.max(0, annualQuota - used));
+    m++;
+    if (m > 12) { m = 1; y++; }
+    if (used >= annualQuota) break;
+  }
+  return used;
 };
 
 export const AttendanceSection: React.FC<AttendanceProps> = ({
@@ -761,11 +775,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ['Medical Allowance', 'Rs 0'],
       ['Conveyance Allowance', 'Rs 0'],
     ];
+    const otherDed = salaryData ? (salaryData.salary.deductions || 0) : ((emp.monthDeduction?.[selectedDate.substring(0, 7)] ?? emp.otherDeduction) || 0);
     const deductItems: [string, string][] = [
       ['EPF(%)', 'Rs 0'],
       ['PF(%)', 'Rs 0'],
       ['TDS', 'Rs 0'],
-      ['Others(-)', 'Rs 0'],
+      ['Others(-)', money(otherDed)],
       ['PTAX', 'Rs 0'],
     ];
     const itemCount = Math.max(earnItems.length, deductItems.length);
@@ -829,7 +844,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
     doc.text('Gross Deductions (B)', sumTableX + padLg, ss);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sText);
-    doc.text('Rs 0', valX, ss, { align: 'right' });
+    doc.text(money(otherDed), valX, ss, { align: 'right' });
     ss += padSm;
 
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -839,7 +854,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
     doc.text('Net Pay (A-B)', sumTableX + padLg, ss + 7);
     doc.setFontSize(13); doc.setTextColor(...sPrimaryDark);
-    doc.text(money(bd.earnedSalary), valX, ss + 7, { align: 'right' });
+    doc.text(money(bd.earnedSalary - otherDed), valX, ss + 7, { align: 'right' });
 
     // ============ 5. FOOTER ============
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -963,7 +978,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         perDaySalary: perDaySalary,
         earnedSalary: earnedSalary,
         allowances: 0,
-        deductions: deductions,
+        deductions: (emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0,
       },
       payPeriod: monthName,
     };
@@ -1315,7 +1330,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-lg font-bold flex items-center gap-2"><FiSliders className="text-cyan-400" /> Casual Leave Settings</h3>
-                <p className="text-xs text-gray-400 mt-1">Configure casual leave quota allowed per employee per year, with a monthly usage limit.</p>
+                <p className="text-xs text-gray-400 mt-1">CL is never refreshed monthly — any unused CL balance automatically carries forward to the next month. The quota is per academic year (June–May).</p>
               </div>
               <button
                 onClick={() => { setClQuotaEdit(v => !v); setClQuotaInput(String(clQuota)); }}
@@ -1352,7 +1367,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             ) : (
               <div className="flex items-center gap-3 mt-2">
                 <span className="text-4xl font-bold text-cyan-400">{clQuota}</span>
-                <span className="text-gray-400 text-sm">casual leave days allowed per employee per year</span>
+                <span className="text-gray-400 text-sm">casual leave days per year. Unused CL carries forward month to month (no monthly refresh).</span>
               </div>
             )}
           </div>
@@ -1443,9 +1458,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       <p className="text-2xl font-bold text-cyan-400">{annualQuota}</p>
                       <p className="text-xs text-gray-400 mt-1">Annual Quota</p>
                     </div>
-                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-yellow-400">{monthLim}</p>
-                      <p className="text-xs text-gray-400 mt-1">Monthly Limit</p>
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold text-emerald-400">{monthLim > 0 ? monthLim : '∞'}</p>
+                      <p className="text-xs text-gray-400 mt-1">{monthLim > 0 ? 'Max / Month' : 'Carry Forward'}</p>
                     </div>
                     <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-center">
                       <p className="text-2xl font-bold text-red-400">{usedThisMonth}</p>
