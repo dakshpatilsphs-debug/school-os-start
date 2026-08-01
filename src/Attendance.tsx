@@ -24,6 +24,7 @@ interface AttendanceProps {
   deleteCausalLeave?: (id: string) => Promise<void>;
   logSalarySlipAudit?: (employeeId: string) => Promise<void>;
   updateEmployee: (id: string, data: any) => Promise<void>;
+  handleDirectSalaryPay?: (expense: any) => Promise<void>;
 }
 
 // Check if a date is a Sunday (auto holiday)
@@ -85,7 +86,7 @@ const getCLUsedBeforeMonth = (empId: string, monthKey: string, allAttendance: At
 export const AttendanceSection: React.FC<AttendanceProps> = ({
   students, employees, attendance, holidays, schoolSettings, isReadOnly,
   saveBatchAttendance, saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
-  addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit, updateEmployee
+  addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit, updateEmployee, handleDirectSalaryPay
 }) => {
   const [subTab, setSubTab] = useState<'student' | 'employee' | 'holidays' | 'causalLeaves'>('student');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -99,6 +100,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   const [newHolidayDate, setNewHolidayDate] = useState('');
   const [newHolidayName, setNewHolidayName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [directPay, setDirectPay] = useState<{ emp: Employee; amount: number } | null>(null);
+  const [directPayAmount, setDirectPayAmount] = useState(0);
+  const [directPaying, setDirectPaying] = useState(false);
 
   // === Causal Leaves State ===
   const [causalLeaves, setCausalLeaves] = useState<CausalLeave[]>([]);
@@ -1020,6 +1024,39 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     return { earnedSalary, grossSalary: gross };
   };
 
+  // ===== Direct Pay (add salary as expense) =====
+  const openDirectPay = (emp: Employee, amount: number) => {
+    if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
+    const currentMonth = selectedDate.substring(0, 7);
+    const otherDed = (emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0;
+    const netPay = Math.max(0, amount - otherDed);
+    setDirectPay({ emp, amount: netPay });
+    setDirectPayAmount(netPay);
+  };
+
+  const confirmDirectPay = async () => {
+    if (!directPay || !handleDirectSalaryPay) return;
+    const currentMonth = selectedDate.substring(0, 7);
+    const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const expense = {
+      category: 'Salaries',
+      amount: Number(directPayAmount) || 0,
+      description: `Salary payment for ${directPay.emp.name} — ${monthName}`,
+      date: selectedDate,
+      paidTo: directPay.emp.name,
+      employeeId: directPay.emp.autoId,
+      status: 'paid',
+      billUrl: '',
+    };
+    setDirectPaying(true);
+    try {
+      await handleDirectSalaryPay(expense);
+      setDirectPay(null);
+    } finally {
+      setDirectPaying(false);
+    }
+  };
+
   // ===== Stats =====
   const filteredStudents = students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter));
   const filteredEmployees = employees.filter(e => e.status === 'ACTIVE');
@@ -1278,6 +1315,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Per Day</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">CL Left</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Earned Salary</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Direct Pay</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">PDF</th>
                       </tr>
                     </thead>
@@ -1301,6 +1339,15 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                             <td className="px-4 py-3 text-gray-400 hidden lg:table-cell">₹{info.perDaySalary.toFixed(0)}</td>
                             <td className="px-4 py-3"><span className="text-cyan-400 font-semibold">{clLeft}</span></td>
                             <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
+                            <td className="px-4 py-3">
+                              <button
+                                onClick={() => openDirectPay(e, effSalary)}
+                                title={`Add salary expense for ${e.name}`}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-semibold rounded-lg shadow transition"
+                              >
+                                <FiDollarSign size={13} /> Pay ₹{Math.max(0, effSalary - ((e.monthDeduction?.[selectedDate.substring(0, 7)] ?? e.otherDeduction) || 0)).toLocaleString()}
+                              </button>
+                            </td>
                             <td className="px-4 py-3">
                               <button
                                 onClick={() => exportSalarySlips(e)}
@@ -1594,6 +1641,57 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Direct Pay (Salary as Expense) Modal ===== */}
+      {directPay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => !directPaying && setDirectPay(null)} />
+          <div className="relative bg-[#1E1E1E] rounded-2xl border border-gray-800 w-full max-w-md p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-emerald-400" /> Direct Pay</h3>
+              <button onClick={() => !directPaying && setDirectPay(null)} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400"><FiX size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-gray-400">Employee</label>
+                <p className="font-semibold mt-1">{directPay.emp.name}</p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Amount (₹)</label>
+                <input
+                  type="number" min={0}
+                  value={directPayAmount}
+                  onChange={e => setDirectPayAmount(Number(e.target.value))}
+                  disabled={directPaying}
+                  className="mt-1 w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white focus:border-cyan-500 transition"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Description (auto)</label>
+                <input
+                  type="text"
+                  value={`Salary payment for ${directPay.emp.name} — ${new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`}
+                  readOnly
+                  className="mt-1 w-full p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-gray-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Month (auto)</label>
+                <input type="text" value={selectedDate.substring(0, 7)} readOnly className="mt-1 w-full p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-gray-300" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={confirmDirectPay}
+                  disabled={directPaying || !handleDirectSalaryPay || directPayAmount <= 0}
+                  className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white px-4 py-3 rounded-xl font-semibold transition disabled:opacity-50"
+                >
+                  <FiCheck size={18} /> {directPaying ? 'Saving...' : `Pay & Add Expense (₹${directPayAmount.toLocaleString()})`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

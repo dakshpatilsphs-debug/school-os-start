@@ -904,6 +904,16 @@ const App: React.FC = () => {
   };
   const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); showNotification(`Selected: ${e.name}`, 'success'); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
   const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); } closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
+  const handleDirectSalaryPay = async (expense: any) => {
+    if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
+    try {
+      const seq = await getNextSequentialId('expenses');
+      const final = { ...expense, autoId: 'EXP-' + String(seq).padStart(3, '0'), status: 'paid' };
+      await addExpense(final);
+      loadData();
+      showNotification(`Salary expense added for ${final.paidTo} — ₹${Number(final.amount || 0).toLocaleString()}`, 'success');
+    } catch (error) { showFirebaseError(error, 'Failed to add salary expense'); }
+  };
 
   const getTodayISO = () => new Date().toISOString().split('T')[0];
 
@@ -3793,6 +3803,7 @@ const App: React.FC = () => {
             deleteCausalLeave={deleteCausalLeave}
             logSalarySlipAudit={logSalarySlipAudit}
             updateEmployee={updateEmployee}
+            handleDirectSalaryPay={handleDirectSalaryPay}
           />
         )}
 
