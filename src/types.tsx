@@ -56,6 +56,7 @@ export interface Employee {
   clAllowance?: number;
   otherDeduction?: number;
   monthDeduction?: Record<string, number>;
+  hidden?: boolean;
 
 }
 export interface CausalLeave { id?: string; employeeId: string; date: string; reason: string; }

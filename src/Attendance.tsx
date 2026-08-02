@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiUsers, FiBriefcase, FiCalendar, FiCheck, FiX, FiPlus, FiTrash2, FiDollarSign, FiTrendingUp, FiUpload, FiDownload, FiFileText, FiEye, FiSliders } from 'react-icons/fi';
+import { FiUsers, FiBriefcase, FiCalendar, FiCheck, FiX, FiPlus, FiTrash2, FiDollarSign, FiTrendingUp, FiUpload, FiDownload, FiFileText, FiEye, FiEyeOff, FiSliders } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -103,6 +103,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   const [directPay, setDirectPay] = useState<{ emp: Employee; amount: number } | null>(null);
   const [directPayAmount, setDirectPayAmount] = useState(0);
   const [directPaying, setDirectPaying] = useState(false);
+  const [showSalaryCalc, setShowSalaryCalc] = useState(true);
 
   // === Causal Leaves State ===
   const [causalLeaves, setCausalLeaves] = useState<CausalLeave[]>([]);
@@ -1302,8 +1303,14 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-yellow-400" /> Salary Calculation ({selectedDate.substring(0, 7)})</h3>
                     <p className="text-xs text-gray-400 mt-1">Salary based on present days. Sundays & holidays auto-excluded.</p>
                   </div>
-                  <button onClick={exportMonthlySalaryReport} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-5 py-2 rounded-xl self-start"><FiDownload size={16} />Monthly Salary Report (Excel)</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowSalaryCalc(v => !v)} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-5 py-2 rounded-xl self-start">
+                      {showSalaryCalc ? <FiEyeOff size={16} /> : <FiEye size={16} />}{showSalaryCalc ? 'Hide' : 'Show'}
+                    </button>
+                    <button onClick={exportMonthlySalaryReport} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-5 py-2 rounded-xl self-start"><FiDownload size={16} />Monthly Salary Report (Excel)</button>
+                  </div>
                 </div>
+                {showSalaryCalc && (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-gray-800/50">
@@ -1363,6 +1370,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             </>
           )}
@@ -1692,6 +1700,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                   <FiCheck size={18} /> {directPaying ? 'Saving...' : `Pay & Add Expense (₹${directPayAmount.toLocaleString()})`}
                 </button>
               </div>
+              {directPaying && <div className="progressBar" />}
             </div>
           </div>
         </div>
