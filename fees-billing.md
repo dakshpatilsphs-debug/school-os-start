@@ -1,2 +1,0 @@
-the majour change I want - 
- creat an secondary auto id in fees and billing where it is created by student name , class , and roll number and if the the first auto id is changed or updated in correction page then in fees and billing will use the secondary auto id and find the student as per the information and assine it to the student and the secondary auto id works at the back of panel not been seen but saved at the firestore add an button correction page where it will be assined to all student and add an small progress bar to all the saving 

@@ -1,27 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { FiUsers, FiBriefcase, FiCalendar, FiCheck, FiX, FiPlus, FiTrash2, FiDollarSign, FiTrendingUp, FiUpload, FiDownload, FiFileText, FiEye, FiEyeOff, FiSliders } from 'react-icons/fi';
+import { FiUsers, FiBriefcase, FiCalendar, FiCheck, FiX, FiPlus, FiTrash2, FiDollarSign, FiTrendingUp, FiUpload, FiDownload, FiFileText, FiEye, FiEyeOff, FiSliders, FiClock } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Student, Employee, Attendance as Att, Holiday, CausalLeave } from './types';
+import { Employee, Attendance as Att, Holiday, Expense } from './types';
 import type { SalarySlipData } from './salarySlipTypes';
+import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, getMonthAttSummary, isClCovered } from './clUtils';
 
 interface AttendanceProps {
-  students: Student[];
   employees: Employee[];
   attendance: Att[];
   holidays: Holiday[];
+  expenses: Expense[];
   schoolSettings: any;
   isReadOnly?: boolean;
-  saveBatchAttendance: (records: any[]) => Promise<any>;
   saveAttendance: (record: any) => Promise<any>;
   addHoliday: (holiday: any) => Promise<any>;
   deleteHoliday: (id: string) => Promise<void>;
   showNotification: (msg: string, type: 'success' | 'error') => void;
   loadData: () => Promise<void>;
-  addCausalLeave?: (employeeId: string, date: string, reason: string) => Promise<any>;
-  getCausalLeaves?: (employeeId: string) => Promise<any[]>;
-  deleteCausalLeave?: (id: string) => Promise<void>;
   logSalarySlipAudit?: (employeeId: string) => Promise<void>;
   updateEmployee: (id: string, data: any) => Promise<void>;
   handleDirectSalaryPay?: (expense: any) => Promise<void>;
@@ -38,79 +35,25 @@ const isManualHoliday = (dateStr: string, holidays: Holiday[]) => {
   return holidays.find(h => h.date === dateStr && h.type === 'manual');
 };
 
-// Get academic year start month (June to May) for a given monthKey (YYYY-MM)
-const getAcademicYearStart = (monthKey: string) => {
-  const [, month] = monthKey.split('-').map(Number);
-  const year = parseInt(monthKey.substring(0, 4));
-  const startYear = month >= 6 ? year : year - 1;
-  return `${startYear}-06`;
-};
-
-// Get effective CL quota for an employee (per-employee override or global fallback)
-const getEmpClQuota = (emp?: Employee | null) => {
-  const global = Math.max(0, parseInt(localStorage.getItem('clQuota') || '12'));
-  return emp?.clQuota && emp.clQuota > 0 ? emp.clQuota : global;
-};
-
-// Get max CL days allowed per month for an employee (0 = unlimited carry-forward)
-const getClMonthlyLimit = (emp: Employee | undefined | null) => {
-  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 0;
-};
-
-// Per-month cap applies only to current/future months — old entries are never affected.
-const getMonthCap = (monthKey: string, monthLim: number, annualQuota: number) => {
-  const now = new Date();
-  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  if (monthKey < cur) return annualQuota;
-  return monthLim > 0 ? monthLim : annualQuota;
-};
-
-// CL is never refreshed monthly. Unused CL carries forward to the next month.
-// CL used before the given month = absences auto-covered by CL in all prior months of the academic year.
-const getCLUsedBeforeMonth = (empId: string, monthKey: string, allAttendance: Att[], _monthlyLimit: number, annualQuota: number) => {
-  const [y0, m0] = getAcademicYearStart(monthKey).split('-').map(Number);
-  const [y1, m1] = monthKey.split('-').map(Number);
-  let used = 0;
-  let y = y0, m = m0;
-  while (y < y1 || (y === y1 && m < m1)) {
-    const mk = `${y}-${String(m).padStart(2, '0')}`;
-    const absents = allAttendance.filter(a => a.personId === empId && a.date.startsWith(mk) && a.status === 'absent').length;
-    used += Math.min(absents, Math.max(0, annualQuota - used));
-    m++;
-    if (m > 12) { m = 1; y++; }
-    if (used >= annualQuota) break;
-  }
-  return used;
-};
-
 export const AttendanceSection: React.FC<AttendanceProps> = ({
-  students, employees, attendance, holidays, schoolSettings, isReadOnly,
-  saveBatchAttendance, saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
-  addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit, updateEmployee, handleDirectSalaryPay
+  employees, attendance, holidays, expenses, schoolSettings, isReadOnly,
+  saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
+  logSalarySlipAudit, updateEmployee, handleDirectSalaryPay
 }) => {
-  const [subTab, setSubTab] = useState<'student' | 'employee' | 'holidays' | 'causalLeaves'>('student');
+  const [subTab, setSubTab] = useState<'employee' | 'holidays' | 'causalLeaves'>('employee');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [classFilter, setClassFilter] = useState('');
-  const [selectedMonthlyStudentId, setSelectedMonthlyStudentId] = useState('');
   const [selectedMonthlyEmployeeId, setSelectedMonthlyEmployeeId] = useState('');
   const [salaryType, setSalaryType] = useState<'new' | 'old'>('new');
   const [editMonthSalary, setEditMonthSalary] = useState(false);
   const [monthSalaryInput, setMonthSalaryInput] = useState('');
-  const [attendanceChanges, setAttendanceChanges] = useState<Record<string, 'present' | 'absent'>>({});
   const [newHolidayDate, setNewHolidayDate] = useState('');
   const [newHolidayName, setNewHolidayName] = useState('');
-  const [saving, setSaving] = useState(false);
   const [directPay, setDirectPay] = useState<{ emp: Employee; amount: number } | null>(null);
   const [directPayAmount, setDirectPayAmount] = useState(0);
   const [directPaying, setDirectPaying] = useState(false);
   const [showSalaryCalc, setShowSalaryCalc] = useState(true);
 
-  // === Causal Leaves State ===
-  const [causalLeaves, setCausalLeaves] = useState<CausalLeave[]>([]);
-  const [clEmpId, setClEmpId] = useState('');
-  const [clDate, setClDate] = useState(new Date().toISOString().split('T')[0]);
-  const [clReason, setClReason] = useState('');
-  const [clLoading, setClLoading] = useState(false);
+  // === CL State ===
   const [clViewEmpId, setClViewEmpId] = useState('');
   // Casual leave quota - per employee per year (customisable via schoolSettings)
   const [clQuota, setClQuota] = useState<number>(() => {
@@ -120,17 +63,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   const [clQuotaEdit, setClQuotaEdit] = useState(false);
   const [clQuotaInput, setClQuotaInput] = useState('');
 
-  // Load causal leaves when view employee changes
-  useEffect(() => {
-    if (!clViewEmpId || !getCausalLeaves) return;
-    setClLoading(true);
-    getCausalLeaves(clViewEmpId)
-      .then(data => setCausalLeaves(data as CausalLeave[]))
-      .catch(() => {})
-      .finally(() => setClLoading(false));
-  }, [clViewEmpId]);
-
-
 
   const dateStatus = (dateStr: string): 'sunday' | 'manual-holiday' | 'working' => {
     if (isSunday(dateStr)) return 'sunday';
@@ -139,79 +71,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   };
 
   const isHoliday = (dateStr: string) => dateStatus(dateStr) !== 'working';
-
-  // Get attendance for a person on selected date
-  const getPersonAttendance = (personId: string): 'present' | 'absent' | 'holiday' | null => {
-    const record = attendance.find(a => a.personId === personId && a.date === selectedDate);
-    return record?.status || null;
-  };
-
-  // Get effective status (including pending changes)
-  const getEffectiveStatus = (personId: string): 'present' | 'absent' | null => {
-    if (personId in attendanceChanges) return attendanceChanges[personId];
-    const record = attendance.find(a => a.personId === personId && a.date === selectedDate);
-    return record?.status === 'present' ? 'present' : record?.status === 'absent' ? 'absent' : null;
-  };
-
-  const setPersonStatus = (personId: string, status: 'present' | 'absent') => {
-    setAttendanceChanges(prev => ({ ...prev, [personId]: status }));
-  };
-
-  const markAllPresent = (persons: { id?: string; autoId: string }[]) => {
-    const changes: Record<string, 'present' | 'absent'> = {};
-    persons.forEach(p => { if (p.autoId) changes[p.autoId] = 'present'; });
-    setAttendanceChanges(changes);
-  };
-
-  const handleSaveAttendance = async (personType: 'student' | 'employee') => {
-    if (isReadOnly) { showNotification('Read-only mode: cannot save attendance', 'error'); return; }
-    if (isHoliday(selectedDate)) {
-      showNotification('Cannot mark attendance on a holiday', 'error');
-      return;
-    }
-    if (Object.keys(attendanceChanges).length === 0) {
-      showNotification('No changes to save', 'error');
-      return;
-    }
-    setSaving(true);
-    try {
-      const records: any[] = [];
-      const persons = personType === 'student'
-        ? students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter))
-        : employees.filter(e => e.status === 'ACTIVE');
-
-      Object.entries(attendanceChanges).forEach(([personId, status]) => {
-        const person = persons.find(p => p.autoId === personId);
-        if (person) {
-          const record: any = {
-            personId: person.autoId,
-            personName: person.name,
-            personType,
-            date: selectedDate,
-            status,
-          };
-          // Only add class/role if they have actual values (avoids undefined fields)
-          if (personType === 'student' && (person as Student).class) record.class = (person as Student).class;
-          if (personType === 'employee' && (person as Employee).role) record.role = (person as Employee).role;
-          records.push(record);
-        }
-      });
-      const result = await saveBatchAttendance(records);
-      await loadData();
-      setAttendanceChanges({});
-      const successCount = result.total - result.failed;
-      if (result.failed === 0) {
-        showNotification(`✓ Attendance saved for ${successCount} ${personType}s`, 'success');
-      } else if (successCount > 0) {
-        showNotification(`Saved ${successCount}/${result.total}. ${result.failed} failed: ${result.error}`, 'error');
-      } else {
-        showNotification(`Save failed: ${result.error || 'Check your connection'}`, 'error');
-      }
-    } catch (error: any) {
-      showNotification(`Failed to save: ${error?.message || 'Unknown error'}`, 'error');
-    }
-    setSaving(false);
-  };
 
   const handleAddHoliday = async () => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add holiday', 'error'); return; }
@@ -242,91 +101,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     }
   };
 
-  // ===== Export Functions =====
-  const exportAttendanceExcel = (personType: 'student' | 'employee') => {
-    const persons = personType === 'student'
-      ? students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter))
-      : employees.filter(e => e.status === 'ACTIVE');
-
-    const data = persons.map(p => {
-      const status = getEffectiveStatus(p.autoId) || '—';
-      const row: any = {
-        'Date': selectedDate,
-        'Day': new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long' }),
-        'Auto ID': p.autoId,
-        'Name': p.name,
-        'Status': status.toUpperCase()
-      };
-      if (personType === 'student') row['Class'] = (p as Student).class;
-      else {
-        const si = getEmployeeSalaryInfo(p as Employee);
-        row['Role'] = (p as Employee).role;
-        row['Present Days'] = si.presentDays;
-        row['Absent Days'] = si.absentDays;
-        row['Working Days'] = si.workingDays;
-        row['Earned Salary (₹)'] = si.netSalary;
-      }
-      return row;
-    });
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-    XLSX.writeFile(wb, `${personType}_attendance_${selectedDate}.xlsx`);
-    showNotification(`Attendance exported to Excel`, 'success');
-  };
-
-  const exportAttendancePDF = (personType: 'student' | 'employee') => {
-    const persons = personType === 'student'
-      ? students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter))
-      : employees.filter(e => e.status === 'ACTIVE');
-
-    const doc = new jsPDF();
-    const pw = 210;
-    // Header
-    doc.setFillColor(0, 102, 204); doc.rect(0, 0, pw, 34, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(20); doc.setFont('helvetica', 'bold');
-    doc.text((schoolSettings.schoolName || 'School OS').toUpperCase(), 14, 18);
-    doc.setFontSize(12); doc.setFont('helvetica', 'normal');
-    doc.text(`${personType === 'student' ? 'Student' : 'Employee'} Attendance Report`, 14, 28);
-
-    // Date info
-    doc.setTextColor(0, 0, 0); doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-    doc.text(`Date: ${selectedDate} (${new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long' })})`, 14, 46);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 52);
-    doc.text(`Present: ${persons.filter(p => getEffectiveStatus(p.autoId) === 'present').length}  |  Absent: ${persons.filter(p => getEffectiveStatus(p.autoId) === 'absent').length}  |  Total: ${persons.length}`, 14, 58);
-
-    // Table
-    let columns: string[];
-    let rows: any[];
-    if (personType === 'student') {
-      columns = ['Auto ID', 'Name', 'Class', 'Status'];
-      rows = persons.map(p => [p.autoId, p.name, (p as Student).class, (getEffectiveStatus(p.autoId) || '—').toUpperCase()]);
-    } else {
-      columns = ['Auto ID', 'Name', 'Role', 'Present', 'Absent', 'Earned Salary (₹)'];
-      rows = persons.map(p => { const si = getEmployeeSalaryInfo(p as Employee); return [p.autoId, p.name, (p as Employee).role, si.presentDays, si.absentDays, si.netSalary.toLocaleString()]; });
-    }
-
-    autoTable(doc, {
-      head: [columns], body: rows, startY: 66, theme: 'grid',
-      headStyles: { fillColor: [0, 102, 204], textColor: [255, 255, 255], fontSize: 10, fontStyle: 'bold' },
-      bodyStyles: { fontSize: 9, textColor: [50, 50, 50] },
-      alternateRowStyles: { fillColor: [245, 245, 245] },
-      styles: { cellPadding: 3 },
-      didParseCell: (data) => {
-        if (data.section === 'body' && columns[data.column.index] === 'Status') {
-          const val = String(data.cell.raw || '').toLowerCase();
-          if (val === 'present') { data.cell.styles.textColor = [16, 185, 129]; data.cell.styles.fontStyle = 'bold'; }
-          else if (val === 'absent') { data.cell.styles.textColor = [239, 68, 68]; data.cell.styles.fontStyle = 'bold'; }
-        }
-      }
-    });
-
-    doc.save(`${personType}_attendance_${selectedDate}.pdf`);
-    showNotification(`Attendance exported to PDF`, 'success');
-  };
-
   // ===== Import Attendance from Excel =====
   const importAttendanceFromExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -348,25 +122,23 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
           const personName = String(row['Name'] || row['Student Name'] || row['Employee Name'] || '').trim();
           const status = String(row['Status'] || row['Attendance'] || '').trim().toLowerCase();
           const date = String(row['Date'] || selectedDate || '').trim();
-          const personType = subTab === 'employee' ? 'employee' : 'student';
+          const personType = 'employee';
 
           if (!personId && !personName) { failed++; continue; }
-          if (!['present', 'absent'].includes(status)) { failed++; continue; }
+          if (!['present', 'absent', 'late'].includes(status)) { failed++; continue; }
 
           // Find matching person
-          const personList = personType === 'employee' ? employees : students;
-          const person = personList.find(p => p.autoId === personId || p.name.toLowerCase() === personName.toLowerCase());
+          const person = employees.find(p => p.autoId === personId || p.name.toLowerCase() === personName.toLowerCase());
           if (!person) { failed++; continue; }
 
           try {
             await saveAttendance({
               personId: person.autoId,
               personName: person.name,
-              personType: personType as any,
+              personType: 'employee' as any,
               date,
               status: status as any,
-              class: personType === 'student' ? (person as any).class : undefined,
-              role: personType === 'employee' ? (person as any).role : undefined,
+              role: (person as any).role,
             });
             success++;
           } catch (err) { failed++; }
@@ -397,18 +169,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
     const data = activeEmps.map(e => {
       const si = getEmployeeSalaryInfo(e);
-      const annualQuota = getEmpClQuota(e);
-      const monthLim = getClMonthlyLimit(e);
-      const usedBefore = getCLUsedBeforeMonth(e.autoId, currentMonth, attendance, monthLim, annualQuota);
-      const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-      const autoCover = Math.min(si.absentDays, getMonthCap(currentMonth, monthLim, annualQuota), remainingAnnual);
-      const effPresent = si.presentDays + autoCover;
-      const effAbsent = Math.max(0, si.absentDays - autoCover);
-      const effSalary = Math.round(effPresent * si.perDaySalary);
+      const effAbsent = si.absentDays;
+      const effSalary = si.earnedSalary;
       return {
         'Auto ID': e.autoId, 'Name': e.name, 'Role': e.role, 'Month': currentMonth,
         'Monthly Salary (₹)': si.monthlySalary, 'Working Days': si.workingDays,
-        'Present Days': si.presentDays, 'CL Covered': autoCover, 'Effective Present': effPresent,
+        'Present Days': si.presentDays, 'Late Days': si.lateDays, 'CL Covered': si.clCovered, 'Effective Present': si.presentDays + si.lateDays + si.clCovered,
         'Absent Days': effAbsent,
         'Per Day (₹)': Math.round(si.perDaySalary), 'Earned Salary (₹)': effSalary
       };
@@ -435,7 +201,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     if (isHoliday(dateStr)) return 'H';
     const rec = attendance.find(a => a.personId === personId && a.date === dateStr);
     if (rec?.status === 'present') return 'P';
-    if (rec?.status === 'absent') return 'A';
+    if (rec?.status === 'late') return 'L';
+    if (rec?.status === 'absent') return isClCovered(rec, currentMonth) ? 'C' : 'A';
     return '-';
   };
 
@@ -457,34 +224,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     });
   };
 
-  const getMonthlyStudentStatus = (studentId: string, dateStr: string) => {
-    const record = attendance.find(
-      a => a.personId === studentId && a.date === dateStr && a.personType === 'student'
-    );
-    if (isHoliday(dateStr)) return 'holiday';
-    return record?.status || '';
-  };
-
-  const setMonthlyStudentAttendance = async (student: Student, dateStr: string, status: 'present' | 'absent') => {
-    if (isReadOnly) { showNotification('Read-only mode: cannot save attendance', 'error'); return; }
-    if (isHoliday(dateStr)) { showNotification('Cannot mark attendance on a holiday', 'error'); return; }
-
-    try {
-      await saveAttendance({
-        personId: student.autoId,
-        personName: student.name,
-        personType: 'student',
-        date: dateStr,
-        status,
-        class: student.class,
-      });
-      await loadData();
-      showNotification(`${student.name} marked ${status} on ${dateStr}`, 'success');
-    } catch (error) {
-      showNotification('Failed to save attendance', 'error');
-    }
-  };
-
   const getMonthlyEmployeeStatus = (employeeId: string, dateStr: string) => {
     const record = attendance.find(
       a => a.personId === employeeId && a.date === dateStr && a.personType === 'employee'
@@ -493,11 +232,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     return record?.status || '';
   };
 
-  const setMonthlyEmployeeAttendance = async (employee: Employee, dateStr: string, status: 'present' | 'absent') => {
+  const setMonthlyEmployeeAttendance = async (employee: Employee, dateStr: string, status: 'present' | 'late' | 'absent') => {
     if (isReadOnly) { showNotification('Read-only mode: cannot save attendance', 'error'); return; }
     if (isHoliday(dateStr)) { showNotification('Cannot mark attendance on a holiday', 'error'); return; }
 
     try {
+      const existing = attendance.find(a => a.personId === employee.autoId && a.date === dateStr && a.personType === 'employee');
       await saveAttendance({
         personId: employee.autoId,
         personName: employee.name,
@@ -505,6 +245,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         date: dateStr,
         status,
         role: employee.role,
+        ...(existing?.clStatus ? { clStatus: existing.clStatus } : {}),
       });
       await loadData();
       showNotification(`${employee.name} marked ${status} on ${dateStr}`, 'success');
@@ -513,30 +254,43 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     }
   };
 
+  // Approve (uses CL, no salary deduction) or disapprove (salary deducted) an absence.
+  const setClApproval = async (rec: Att, clStatus: 'approved' | 'disapproved') => {
+    if (isReadOnly) { showNotification('Read-only mode: cannot update leave status', 'error'); return; }
+    try {
+      await saveAttendance({ ...rec, clStatus });
+      await loadData();
+      showNotification(
+        clStatus === 'approved'
+          ? 'Leave approved — CL will be used, no salary deduction'
+          : 'Leave disapproved — salary will be deducted for this day',
+        'success'
+      );
+    } catch (error) {
+      showNotification('Failed to update leave status', 'error');
+    }
+  };
+
   // ===== Monthly Attendance Excel (Grid Format) =====
-  const exportMonthlyGridExcel = (personType: 'student' | 'employee') => {
+  const exportMonthlyGridExcel = () => {
     const { currentMonth, daysInMonth, monthName } = getMonthInfo();
-    const persons = personType === 'student'
-      ? students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter))
-      : employees.filter(e => e.status === 'ACTIVE');
+    const persons = employees.filter(e => e.status === 'ACTIVE');
 
     if (persons.length === 0) { showNotification('No records to export', 'error'); return; }
 
     // Build header row: Name + [1..31] + Total Present + Total Absent
     const header: string[] = ['Name', 'Auto ID'];
-    if (personType === 'student') header.push('Class');
     for (let d = 1; d <= daysInMonth; d++) header.push(String(d));
     header.push('Present', 'Absent', '% ');
 
     const rows: any[][] = persons.map(p => {
       const row: any[] = [p.name, p.autoId];
-      if (personType === 'student') row.push((p as Student).class || '');
       let present = 0, absent = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         const st = getMonthlyStatus(p.autoId, d);
         row.push(st);
-        if (st === 'P') present++;
-        if (st === 'A') absent++;
+        if (st === 'P' || st === 'L') present++;
+        if (st === 'A' || st === 'C') absent++;
       }
       const pct = (present + absent) > 0 ? Math.round((present / (present + absent)) * 100) : 0;
       row.push(present, absent, `${pct}%`);
@@ -544,27 +298,24 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     });
 
     // Convert to worksheet with merged title
-    const aoa: any[][] = [[`${personType === 'student' ? 'STUDENT' : 'EMPLOYEE'} ATTENDANCE — ${monthName}`]];
+    const aoa: any[][] = [[`EMPLOYEE ATTENDANCE — ${monthName}`]];
     aoa.push(header);
     rows.forEach(r => aoa.push(r));
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = [{ wch: 22 }, { wch: 12 }, ...Array(daysInMonth).fill({ wch: 4 }), { wch: 8 }, { wch: 8 }, { wch: 6 }];
-    if (personType === 'student') ws['!cols'].splice(2, 0, { wch: 8 });
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Monthly Attendance');
-    XLSX.writeFile(wb, `${personType}_monthly_attendance_${currentMonth}.xlsx`);
+    XLSX.writeFile(wb, `employee_monthly_attendance_${currentMonth}.xlsx`);
     showNotification(`Monthly attendance grid exported`, 'success');
   };
 
   // ===== Monthly Attendance PDF (Grid Format - Landscape) =====
-  const exportMonthlyGridPDF = (personType: 'student' | 'employee') => {
+  const exportMonthlyGridPDF = () => {
     const { currentMonth, daysInMonth, monthName } = getMonthInfo();
-    const persons = personType === 'student'
-      ? students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter))
-      : employees.filter(e => e.status === 'ACTIVE');
+    const persons = employees.filter(e => e.status === 'ACTIVE');
 
     if (persons.length === 0) { showNotification('No records to export', 'error'); return; }
 
@@ -574,35 +325,33 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     // Header
     doc.setFillColor(0, 102, 204); doc.rect(0, 0, pw, 22, 'F');
     doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-    doc.text(`${(schoolSettings.schoolName || 'School OS').toUpperCase()} — ${personType === 'student' ? 'Student' : 'Employee'} Attendance`, 14, 14);
+    doc.text(`${(schoolSettings.schoolName || 'School OS').toUpperCase()} — Employee Attendance`, 14, 14);
     doc.setFontSize(11); doc.setFont('helvetica', 'normal');
     doc.text(monthName, pw - 14, 14, { align: 'right' });
 
     // Legend
     doc.setTextColor(80, 80, 80); doc.setFontSize(8);
-    doc.text('P = Present   |   A = Absent   |   H = Holiday   |   - = Not Marked', 14, 30);
+    doc.text('P = Present   |   L = Late (0.5 CL)   |   A = Absent   |   C = CL Approved   |   H = Holiday   |   - = Not Marked', 14, 30);
 
     // Build table
     const headerRow: string[] = ['Name'];
-    if (personType === 'student') headerRow.push('Cls');
     for (let d = 1; d <= daysInMonth; d++) headerRow.push(String(d));
     headerRow.push('P', 'A');
 
     const body = persons.map(p => {
       const row: any[] = [p.name];
-      if (personType === 'student') row.push((p as Student).class || '');
       let present = 0, absent = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         const st = getMonthlyStatus(p.autoId, d);
         row.push(st);
-        if (st === 'P') present++;
-        if (st === 'A') absent++;
+        if (st === 'P' || st === 'L') present++;
+        if (st === 'A' || st === 'C') absent++;
       }
       row.push(String(present), String(absent));
       return row;
     });
 
-    const dateColStart = personType === 'student' ? 2 : 1;
+    const dateColStart = 1;
     autoTable(doc, {
       head: [headerRow], body, startY: 34, theme: 'grid',
       headStyles: { fillColor: [0, 102, 204], textColor: [255, 255, 255], fontSize: 6, fontStyle: 'bold', halign: 'center', cellPadding: 1 },
@@ -613,7 +362,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         if (data.section === 'body' && data.column.index >= dateColStart) {
           const val = String(data.cell.raw || '');
           if (val === 'P') { data.cell.styles.textColor = [16, 185, 129]; data.cell.styles.fontStyle = 'bold'; }
+          else if (val === 'L') { data.cell.styles.textColor = [234, 179, 8]; data.cell.styles.fontStyle = 'bold'; }
           else if (val === 'A') { data.cell.styles.textColor = [239, 68, 68]; data.cell.styles.fontStyle = 'bold'; }
+          else if (val === 'C') { data.cell.styles.textColor = [6, 182, 212]; }
           else if (val === 'H') { data.cell.styles.textColor = [147, 51, 234]; }
         }
         // Highlight P/A total columns
@@ -880,15 +631,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         if (idx > 0) doc.addPage();
         let effectiveData = salaryData;
         if (!effectiveData) {
-          let clCount = 0;
-          try {
-            if (typeof getCausalLeaves !== 'undefined' && getCausalLeaves) {
-              const cl = await getCausalLeaves(emp.autoId);
-              const currentMonth = selectedDate.substring(0, 7);
-              clCount = Array.isArray(cl) ? cl.filter((c: any) => c.date?.startsWith(currentMonth)).length : 0;
-            }
-          } catch {}
-          effectiveData = getSalarySlipDataForAttend(emp, clCount);
+          effectiveData = getSalarySlipDataForAttend(emp, 0);
         }
         drawSalarySlip(doc, emp, !!singleEmp, effectiveData.attendance.casualLeavesUsed, effectiveData);
         if (singleEmp && logSalarySlipAudit) {
@@ -915,29 +658,19 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   // ===== Salary Calculation for Employees =====
   const getEmployeeSalaryInfo = (employee: Employee) => {
     const currentMonth = selectedDate.substring(0, 7); // YYYY-MM
-    const empAttendance = attendance.filter(a => a.personId === employee.autoId && a.date.startsWith(currentMonth));
-    const presentDays = empAttendance.filter(a => a.status === 'present').length;
-    const absentDays = empAttendance.filter(a => a.status === 'absent').length;
+    const summ = getMonthAttSummary(employee.autoId, currentMonth, attendance, holidays);
 
-    // Calculate working days in current month (excluding Sundays + manual holidays)
-    const [year, month] = currentMonth.split('-').map(Number);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    let workingDays = 0;
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${currentMonth}-${day.toString().padStart(2, '0')}`;
-      if (!isHoliday(dateStr)) workingDays++;
-    }
-
-    // Salary based on present days out of working days
+    // Salary based on present+late+CL-covered days out of working days; approved CL is fully paid
     const monthlySalary = salaryType === 'old'
       ? (employee.monthSalary?.[currentMonth] ?? employee.oldSalary ?? employee.salary)
       : employee.salary;
-    const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
-    const earnedSalary = Math.round(presentDays * perDaySalary);
-    const deductions = Math.round(absentDays * perDaySalary);
+    const perDaySalary = summ.workingDays > 0 ? monthlySalary / summ.workingDays : 0;
+    const paidDays = summ.present + summ.late + summ.clApproved;
+    const earnedSalary = Math.round(paidDays * perDaySalary);
+    const deductions = Math.round(summ.absent * perDaySalary);
     const netSalary = earnedSalary;
 
-    return { presentDays, absentDays, workingDays, monthlySalary, perDaySalary, earnedSalary, deductions, netSalary };
+    return { presentDays: summ.present, lateDays: summ.late, absentDays: summ.absent, clCovered: summ.clApproved, paidDays, workingDays: summ.workingDays, monthlySalary, perDaySalary, earnedSalary, deductions, netSalary };
   };
 
   const getSalarySlipDataForAttend = (emp: Employee, _clCount: number = 0): SalarySlipData => {
@@ -945,15 +678,10 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const info = getEmployeeSalaryInfo(emp);
     const annualQuota = getEmpClQuota(emp);
-    const monthLim = getClMonthlyLimit(emp);
-    const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
-    const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-                        const autoCover = Math.min(info.absentDays, getMonthCap(selectedDate.substring(0, 7), monthLim, annualQuota), remainingAnnual);
-    const effectivePresent = info.presentDays + autoCover;
-    const effectiveAbsent = Math.max(0, info.absentDays - autoCover);
+    const usedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
+    const remainingAnnual = Math.max(0, annualQuota - usedTotal);
     const perDaySalary = info.perDaySalary;
-    const earnedSalary = Math.round(effectivePresent * perDaySalary);
-    const deductions = Math.round(effectiveAbsent * perDaySalary);
+    const earnedSalary = Math.round((info.presentDays + info.lateDays + info.clCovered) * perDaySalary);
     return {
       school: {
         name: (schoolSettings?.schoolName || 'School OS').toUpperCase(),
@@ -974,9 +702,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       attendance: {
         workingDays: info.workingDays,
         presentDays: info.presentDays,
-        absentDays: effectiveAbsent,
-        casualLeavesUsed: autoCover,
-        casualLeavesRemaining: Math.max(0, remainingAnnual - autoCover),
+        absentDays: info.absentDays,
+        casualLeavesUsed: usedTotal,
+        casualLeavesRemaining: remainingAnnual,
       },
       salary: {
         monthlyGross: info.monthlySalary,
@@ -1059,22 +787,29 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   };
 
   // ===== Stats =====
-  const filteredStudents = students.filter(s => s.status === 'ACTIVE' && (!classFilter || s.class === classFilter));
   const filteredEmployees = employees.filter(e => e.status === 'ACTIVE');
-  const todayPresent = attendance.filter(a => a.date === selectedDate && a.status === 'present').length;
-  const todayAbsent = attendance.filter(a => a.date === selectedDate && a.status === 'absent').length;
+  const todayPresent = attendance.filter(a => a.date === selectedDate && a.personType === 'employee' && a.status === 'present').length;
+  const todayAbsent = attendance.filter(a => a.date === selectedDate && a.personType === 'employee' && a.status === 'absent').length;
 
   const dayLabel = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const statusInfo = dateStatus(selectedDate);
+
+  const isEmployeePaidForMonth = (emp: Employee, month: string) => {
+    return expenses.some(e =>
+      e.employeeId === emp.autoId &&
+      e.category === 'Salaries' &&
+      e.status === 'paid' &&
+      e.date.startsWith(month)
+    );
+  };
 
   return (
     <div className="space-y-6">
       {/* Sub Tabs */}
       <div className="flex gap-2 flex-wrap">
         {[
-          { id: 'student', icon: FiUsers, label: 'Student Attendance' },
           { id: 'employee', icon: FiBriefcase, label: 'Employee Attendance' },
-          { id: 'causalLeaves', icon: FiSliders, label: 'Casual Leaves' },
+          { id: 'causalLeaves', icon: FiSliders, label: 'CL & Deduction' },
           { id: 'holidays', icon: FiCalendar, label: 'Holidays' }
         ].map(t => (
           <button key={t.id} onClick={() => setSubTab(t.id as any)} className={`flex items-center gap-2 px-5 py-3 rounded-xl border transition-all ${subTab === t.id ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white border-transparent shadow-lg shadow-cyan-500/20' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>
@@ -1095,7 +830,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <label className="text-xs text-cyan-400">Select Date</label>
-            <input type="date" value={selectedDate} onChange={e => { setSelectedDate(e.target.value); setAttendanceChanges({}); }} className="block mt-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" />
+            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="block mt-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" />
             <p className="text-sm text-gray-400 mt-2">{dayLabel}</p>
             {statusInfo === 'sunday' && <span className="inline-block mt-2 px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-xs font-semibold">🌙 Auto Holiday (Sunday)</span>}
             {statusInfo === 'manual-holiday' && <span className="inline-block mt-2 px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-xs font-semibold">🎉 Holiday - {isManualHoliday(selectedDate, holidays)?.name}</span>}
@@ -1120,92 +855,6 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
           <div className="text-4xl mb-3">🎉</div>
           <h3 className="text-xl font-bold text-purple-400 mb-2">{statusInfo === 'sunday' ? 'Sunday Holiday' : isManualHoliday(selectedDate, holidays)?.name}</h3>
           <p className="text-gray-400">Attendance is disabled on holidays</p>
-        </div>
-      )}
-
-      {/* ===== Student Attendance ===== */}
-      {subTab === 'student' && !isHoliday(selectedDate) && (
-        <div className="space-y-4">
-          <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-5 space-y-4">
-            <div className="flex flex-col md:flex-row gap-4 md:items-end">
-              <div className="flex-1">
-                <label className="text-xs text-cyan-400">Filter Class</label>
-                <select
-                  value={classFilter}
-                  onChange={e => {
-                    setClassFilter(e.target.value);
-                    setSelectedMonthlyStudentId('');
-                  }}
-                  className="w-full mt-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"
-                >
-                  <option value="">All Classes</option>
-                  {[...new Set(students.filter(s => s.status === 'ACTIVE').map(s => s.class))].filter(Boolean).sort().map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-
-              <div className="flex-[2]">
-                <label className="text-xs text-cyan-400">Monthly Student Attendance</label>
-                <select value={selectedMonthlyStudentId} onChange={e => setSelectedMonthlyStudentId(e.target.value)} className="w-full mt-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white">
-                  <option value="">-- Select Student for Monthly View --</option>
-                  {filteredStudents.sort((a, b) => a.class.localeCompare(b.class) || a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.autoId}>{s.class} | {s.autoId} - {s.name}</option>)}
-                </select>
-              </div>
-
-              <div className="text-xs text-gray-400">Month: <span className="text-cyan-400 font-semibold">{getMonthInfo().monthName}</span></div>
-            </div>
-
-            {selectedMonthlyStudentId && (() => {
-              const selectedStudent = students.find(s => s.autoId === selectedMonthlyStudentId);
-              if (!selectedStudent) return <div className="text-sm text-red-400">Selected student not found.</div>;
-
-              return (
-                <div className="overflow-x-auto">
-                  <div className="min-w-max">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30"><p className="font-bold text-white">{selectedStudent.name}</p><p className="text-xs text-cyan-400">{selectedStudent.class} | {selectedStudent.autoId}</p></div>
-                      <div className="flex items-center gap-3 text-xs text-gray-400"><span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500"></span> Present</span><span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500"></span> Absent</span><span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-500"></span> Holiday</span></div>
-                    </div>
-
-                    <div className="flex gap-2 pb-2">
-                      {getSelectedMonthDays().map(day => {
-                        const status = getMonthlyStudentStatus(selectedStudent.autoId, day.dateStr);
-                        const isPresent = status === 'present';
-                        const isAbsent = status === 'absent';
-                        const isHolidayDay = status === 'holiday';
-
-                        return (
-                          <div key={day.dateStr} className={`w-20 shrink-0 rounded-xl border p-2 text-center ${isHolidayDay ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800 border-gray-700'}`}>
-                            <p className="text-xs text-gray-400">{day.weekday}</p>
-                            <p className="text-lg font-bold text-white">{day.label}</p>
-                            {isHolidayDay ? <div className="mt-2 text-xs text-purple-400 font-bold">Holiday</div> : <div className="mt-2 flex flex-col gap-1"><button type="button" onClick={() => setMonthlyStudentAttendance(selectedStudent, day.dateStr, 'present')} className={`px-2 py-1 rounded text-xs font-bold transition ${isPresent ? 'bg-emerald-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-emerald-600/50'}`}>P</button><button type="button" onClick={() => setMonthlyStudentAttendance(selectedStudent, day.dateStr, 'absent')} className={`px-2 py-1 rounded text-xs font-bold transition ${isAbsent ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-red-600/50'}`}>A</button></div>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-          {/* Monthly Report Buttons */}
-          <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 p-4 rounded-xl flex flex-col md:flex-row gap-3 md:items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-purple-400 flex items-center gap-2"><FiCalendar size={16} /> Monthly Attendance Report</h4>
-              <p className="text-xs text-gray-400 mt-1">Full month grid: {getMonthInfo().monthName} — dates as columns, P/A marks, totals at end</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => exportMonthlyGridExcel('student')} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />Monthly Excel</button>
-              <button onClick={() => exportMonthlyGridPDF('student')} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-4 py-2 rounded-lg text-sm"><FiFileText size={16} />Monthly PDF</button>
-            </div>
-          </div>
-
-          {filteredStudents.length === 0 && (
-            <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-8 text-center">
-              <div className="text-5xl mb-3">📋</div>
-              <h3 className="text-lg font-bold mb-1">No Students Found</h3>
-              <p className="text-gray-400 text-sm">Add students or change class filter</p>
-            </div>
-          )}
         </div>
       )}
 
@@ -1265,9 +914,10 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       {getSelectedMonthDays().map(day => {
                         const status = getMonthlyEmployeeStatus(selectedEmployee.autoId, day.dateStr);
                         const isPresent = status === 'present';
+                        const isLate = status === 'late';
                         const isAbsent = status === 'absent';
                         const isHolidayDay = status === 'holiday';
-                        return <div key={day.dateStr} className={`w-20 shrink-0 rounded-xl border p-2 text-center ${isHolidayDay ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800 border-gray-700'}`}><p className="text-xs text-gray-400">{day.weekday}</p><p className="text-lg font-bold text-white">{day.label}</p>{isHolidayDay ? <div className="mt-2 text-xs text-purple-400 font-bold">Holiday</div> : <div className="mt-2 flex flex-col gap-1"><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'present')} className={`px-2 py-1 rounded text-xs font-bold transition ${isPresent ? 'bg-emerald-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-emerald-600/50'}`}>P</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'absent')} className={`px-2 py-1 rounded text-xs font-bold transition ${isAbsent ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-red-600/50'}`}>A</button></div>}</div>;
+                        return <div key={day.dateStr} className={`w-20 shrink-0 rounded-xl border p-2 text-center ${isHolidayDay ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800 border-gray-700'}`}><p className="text-xs text-gray-400">{day.weekday}</p><p className="text-lg font-bold text-white">{day.label}</p>{isHolidayDay ? <div className="mt-2 text-xs text-purple-400 font-bold">Holiday</div> : <div className="mt-2 flex flex-col gap-1"><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'present')} className={`px-2 py-1 rounded text-xs font-bold transition ${isPresent ? 'bg-emerald-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-emerald-600/50'}`}>P</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'late')} className={`px-2 py-1 rounded text-xs font-bold transition ${isLate ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-yellow-600/50'}`}>L</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'absent')} className={`px-2 py-1 rounded text-xs font-bold transition ${isAbsent ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-red-600/50'}`}>A</button></div>}</div>;
                       })}
                     </div>
                   </div>
@@ -1282,8 +932,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
               <p className="text-xs text-gray-400 mt-1">{getMonthInfo().monthName} — Monthly grid + salary slips for all employees</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => exportMonthlyGridExcel('employee')} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />Monthly Excel</button>
-              <button onClick={() => exportMonthlyGridPDF('employee')} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-4 py-2 rounded-lg text-sm"><FiFileText size={16} />Monthly PDF</button>
+              <button onClick={() => exportMonthlyGridExcel()} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />Monthly Excel</button>
+              <button onClick={() => exportMonthlyGridPDF()} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-4 py-2 rounded-lg text-sm"><FiFileText size={16} />Monthly PDF</button>
               <button onClick={() => exportSalarySlips()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>
             </div>
           </div>
@@ -1330,30 +980,35 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       {filteredEmployees.map(e => {
                         const info = getEmployeeSalaryInfo(e);
                         const annualQuota = getEmpClQuota(e);
-                        const monthLim = getClMonthlyLimit(e);
-                        const usedBefore = getCLUsedBeforeMonth(e.autoId, selectedDate.substring(0, 7), attendance, monthLim, annualQuota);
-                        const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-                        const autoCover = Math.min(info.absentDays, getMonthCap(selectedDate.substring(0, 7), monthLim, annualQuota), remainingAnnual);
-                        const effAbsent = Math.max(0, info.absentDays - autoCover);
-                        const effSalary = Math.round((info.presentDays + autoCover) * info.perDaySalary);
-                        const clLeft = Math.max(0, remainingAnnual - autoCover);
+                        const usedTotal = getClUsedTotal(e.autoId, selectedDate.substring(0, 7), attendance);
+                        const remainingAnnual = Math.max(0, annualQuota - usedTotal);
+                        const effAbsent = info.absentDays;
+                        const effSalary = info.earnedSalary;
+                        const clLeft = remainingAnnual;
+                        const paid = isEmployeePaidForMonth(e, selectedDate.substring(0, 7));
                         return (
-                          <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
+                          <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/10 hover:bg-red-500/15' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>
-                            <td className="px-4 py-3"><span className="text-emerald-400 font-semibold">{info.presentDays}</span>{autoCover > 0 && <span className="text-cyan-400 text-xs ml-1">+{autoCover}</span>}</td>
+                            <td className="px-4 py-3"><span className="text-emerald-400 font-semibold">{info.presentDays}</span>{info.lateDays > 0 && <span className="text-yellow-400 text-xs ml-1">+{info.lateDays}L</span>}{info.clCovered > 0 && <span className="text-cyan-400 text-xs ml-1">+{info.clCovered}CL</span>}</td>
                             <td className="px-4 py-3"><span className="text-red-400 font-semibold">{effAbsent}</span></td>
                             <td className="px-4 py-3 text-gray-400 hidden md:table-cell">{info.workingDays}</td>
                             <td className="px-4 py-3 text-gray-400 hidden lg:table-cell">₹{info.perDaySalary.toFixed(0)}</td>
                             <td className="px-4 py-3"><span className="text-cyan-400 font-semibold">{clLeft}</span></td>
                             <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
                             <td className="px-4 py-3">
-                              <button
-                                onClick={() => openDirectPay(e, effSalary)}
-                                title={`Add salary expense for ${e.name}`}
-                                className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-semibold rounded-lg shadow transition"
-                              >
-                                <FiDollarSign size={13} /> Pay ₹{Math.max(0, effSalary - ((e.monthDeduction?.[selectedDate.substring(0, 7)] ?? e.otherDeduction) || 0)).toLocaleString()}
-                              </button>
+                              {paid ? (
+                                <span className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-semibold rounded-lg border border-red-500/30">
+                                  <FiCheck size={13} /> Paid
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => openDirectPay(e, effSalary)}
+                                  title={`Add salary expense for ${e.name}`}
+                                  className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-semibold rounded-lg shadow transition"
+                                >
+                                  <FiDollarSign size={13} /> Pay ₹{Math.max(0, effSalary - ((e.monthDeduction?.[selectedDate.substring(0, 7)] ?? e.otherDeduction) || 0)).toLocaleString()}
+                                </button>
+                              )}
                             </td>
                             <td className="px-4 py-3">
                               <button
@@ -1380,12 +1035,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       {/* ===== Causal Leaves Management ===== */}
       {subTab === 'causalLeaves' && (
         <div className="space-y-6">
-          {/* Quota Settings */}
+          {/* CL Settings */}
           <div className="bg-[#1E1E1E] rounded-2xl border border-cyan-500/20 p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-bold flex items-center gap-2"><FiSliders className="text-cyan-400" /> Casual Leave Settings</h3>
-                <p className="text-xs text-gray-400 mt-1">CL is never refreshed monthly — any unused CL balance automatically carries forward to the next month. The quota is per academic year (June–May).</p>
+                <h3 className="text-lg font-bold flex items-center gap-2"><FiSliders className="text-cyan-400" /> CL Settings</h3>
+                <p className="text-xs text-gray-400 mt-1">CL is granted manually and never refreshed monthly — unused CL balance carries forward to the next month. Quota is per academic year (June–May).</p>
               </div>
               <button
                 onClick={() => { setClQuotaEdit(v => !v); setClQuotaInput(String(clQuota)); }}
@@ -1427,66 +1082,18 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             )}
           </div>
 
-          {/* Add Leave Form */}
-          {!isReadOnly && (
-            <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-6">
-              <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><FiPlus className="text-cyan-400" /> Add Casual Leave</h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <select
-                  value={clEmpId}
-                  onChange={e => setClEmpId(e.target.value)}
-                  className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"
-                >
-                  <option value="">-- Select Employee --</option>
-                  {employees.filter(e => e.status === 'ACTIVE').sort((a, b) => a.name.localeCompare(b.name)).map(e => (
-                    <option key={e.id} value={e.autoId}>{e.name} ({e.autoId})</option>
-                  ))}
-                </select>
-                <input
-                  type="date" value={clDate}
-                  onChange={e => setClDate(e.target.value)}
-                  className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"
-                />
-                <input
-                  placeholder="Reason (e.g. Personal)"
-                  value={clReason}
-                  onChange={e => setClReason(e.target.value)}
-                  className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"
-                />
-                <button
-                  onClick={async () => {
-                    if (!clEmpId) { showNotification('Select an employee', 'error'); return; }
-                    if (!clDate) { showNotification('Select a date', 'error'); return; }
-                    if (!clReason.trim()) { showNotification('Enter a reason', 'error'); return; }
-                    if (!addCausalLeave) { showNotification('addCausalLeave function not connected', 'error'); return; }
-                    try {
-                      await addCausalLeave(clEmpId, clDate, clReason.trim());
-                      showNotification('Casual leave added', 'success');
-                      setClReason('');
-                      // Refresh if we're viewing this employee
-                      if (clViewEmpId === clEmpId && getCausalLeaves) {
-                        const updated = await getCausalLeaves(clEmpId);
-                        setCausalLeaves(updated as CausalLeave[]);
-                      }
-                    } catch { showNotification('Failed to add casual leave', 'error'); }
-                  }}
-                  className="flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-4 py-3 rounded-lg font-semibold transition"
-                >
-                  <FiPlus size={16} /> Add Leave
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* View Leaves for Employee */}
+          {/* CL & Deduction Management */}
           <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-6">
-            <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><FiEye className="text-cyan-400" /> View Employee Leaves</h3>
+            <h3 className="text-lg font-bold mb-1 flex items-center gap-2"><FiEye className="text-cyan-400" /> CL &amp; Deduction Management</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              Approve an absence to cover it with CL (no salary deduction, 1 CL used). Disapprove it to deduct salary for that day. Late marks use 0.5 CL each and count as present. Month shown: <span className="text-cyan-400 font-semibold">{selectedDate.substring(0, 7)}</span>
+            </p>
             <select
               value={clViewEmpId}
               onChange={e => setClViewEmpId(e.target.value)}
               className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white mb-4"
             >
-              <option value="">-- Select Employee to View Leaves --</option>
+              <option value="">-- Select Employee --</option>
               {employees.filter(e => e.status === 'ACTIVE').sort((a, b) => a.name.localeCompare(b.name)).map(e => (
                 <option key={e.id} value={e.autoId}>{e.name} — {e.role} ({e.autoId})</option>
               ))}
@@ -1494,17 +1101,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
             {clViewEmpId && (() => {
               const emp = employees.find(e => e.autoId === clViewEmpId);
-              const annualQuota = getEmpClQuota(emp);
-              const monthLim = getClMonthlyLimit(emp);
-              const academicYearStart = getAcademicYearStart(selectedDate.substring(0, 7));
               const currentMonthKey = selectedDate.substring(0, 7);
-              const usedThisYear = causalLeaves.filter(cl => {
-                const m = cl.date.substring(0, 7);
-                return m >= academicYearStart && m <= currentMonthKey;
-              }).length;
-              const usedThisMonth = causalLeaves.filter(cl => cl.date.substring(0, 7) === currentMonthKey).length;
-              const remainingYear = Math.max(0, annualQuota - usedThisYear);
-              const used = causalLeaves.length;
+              const annualQuota = getEmpClQuota(emp);
+              const summ = getMonthAttSummary(emp!.autoId, currentMonthKey, attendance, holidays);
+              const usedTotal = getClUsedTotal(emp!.autoId, currentMonthKey, attendance);
+              const remainingYear = Math.max(0, annualQuota - usedTotal);
+              const lateDays = summ.late;
               return (
                 <div className="space-y-4">
                   {/* Summary badges */}
@@ -1513,20 +1115,27 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       <p className="text-2xl font-bold text-cyan-400">{annualQuota}</p>
                       <p className="text-xs text-gray-400 mt-1">Annual Quota</p>
                     </div>
-                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-emerald-400">{monthLim > 0 ? monthLim : '∞'}</p>
-                      <p className="text-xs text-gray-400 mt-1">{monthLim > 0 ? 'Max / Month' : 'Carry Forward'}</p>
-                    </div>
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-red-400">{usedThisMonth}</p>
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold text-blue-400">{summ.clUsedThisMonth}</p>
                       <p className="text-xs text-gray-400 mt-1">Used This Month</p>
                     </div>
+                    {summ.pending > 0 ? (
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-center">
+                        <p className="text-2xl font-bold text-yellow-400">{summ.pending}</p>
+                        <p className="text-xs text-gray-400 mt-1">Pending Decision</p>
+                      </div>
+                    ) : (
+                      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
+                        <p className="text-2xl font-bold text-emerald-400">0</p>
+                        <p className="text-xs text-gray-400 mt-1">Pending Decision</p>
+                      </div>
+                    )}
                     <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
                       <p className="text-2xl font-bold text-emerald-400">{remainingYear}</p>
                       <p className="text-xs text-gray-400 mt-1">Remaining (Year)</p>
                     </div>
                     <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 text-center">
-                      <p className="text-2xl font-bold text-purple-400">{usedThisYear}/{annualQuota}</p>
+                      <p className="text-2xl font-bold text-purple-400">{usedTotal}/{annualQuota}</p>
                       <p className="text-xs text-gray-400 mt-1">Year Usage</p>
                     </div>
                   </div>
@@ -1534,58 +1143,83 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                   {/* Progress bar */}
                   <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
-                      <span>Annual Leave Usage</span>
-                      <span>{usedThisYear}/{annualQuota} days</span>
+                      <span>Annual CL Usage</span>
+                      <span>{usedTotal}/{annualQuota} days</span>
                     </div>
                     <div className="w-full bg-gray-800 rounded-full h-2">
                       <div
                         className={`h-2 rounded-full transition-all ${remainingYear === 0 ? 'bg-red-500' : remainingYear <= 3 ? 'bg-yellow-500' : 'bg-cyan-500'}`}
-                        style={{ width: `${Math.min(100, annualQuota > 0 ? (usedThisYear / annualQuota) * 100 : 0)}%` }}
+                        style={{ width: `${Math.min(100, annualQuota > 0 ? (usedTotal / annualQuota) * 100 : 0)}%` }}
                       />
                     </div>
                   </div>
 
-                  {clLoading ? (
-                    <div className="text-center py-8 text-gray-400">Loading leaves...</div>
-                  ) : causalLeaves.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">No casual leaves recorded for {emp?.name}.</div>
+                  {lateDays > 0 && (
+                    <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-sm">
+                      <FiClock className="text-yellow-400 shrink-0" />
+                      <span className="text-gray-300">{lateDays} late mark{lateDays > 1 ? 's' : ''} this month — uses {lateDays * 0.5} CL ({lateDays * 0.5} day{lateDays * 0.5 === 1 ? '' : 's'}). Late marks already count as present for salary.</span>
+                    </div>
+                  )}
+
+                  {summ.records.filter(r => r.status === 'absent').length === 0 ? (
+                    <div className="text-center py-10">
+                      <div className="text-5xl mb-3">📋</div>
+                      <p className="text-gray-500">No absences recorded for {emp?.name} in {currentMonthKey}. Absences marked in the attendance grid will appear here for approval.</p>
+                    </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead className="bg-gray-800/50">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">#</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Date</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Reason</th>
-                            {!isReadOnly && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Action</th>}
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Day</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Action</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {causalLeaves.map((cl, idx) => (
-                            <tr key={cl.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
-                              <td className="px-4 py-3 text-gray-500 text-sm">{idx + 1}</td>
-                              <td className="px-4 py-3 font-mono text-cyan-400 text-sm">{cl.date}</td>
-                              <td className="px-4 py-3 text-sm">{cl.reason}</td>
-                              {!isReadOnly && (
-                                <td className="px-4 py-3">
-                                  <button
-                                    onClick={async () => {
-                                      if (!cl.id || !deleteCausalLeave) return;
-                                      if (!confirm('Delete this leave record?')) return;
-                                      try {
-                                        await deleteCausalLeave(cl.id);
-                                        setCausalLeaves(prev => prev.filter(x => x.id !== cl.id));
-                                        showNotification('Leave deleted', 'success');
-                                      } catch { showNotification('Failed to delete', 'error'); }
-                                    }}
-                                    className="text-red-400 hover:text-red-300 p-1.5 hover:bg-red-500/20 rounded transition"
-                                  >
-                                    <FiTrash2 size={15} />
-                                  </button>
+                          {summ.records.filter(r => r.status === 'absent').sort((a, b) => a.date.localeCompare(b.date)).map(rec => {
+                            const isApproved = isClCovered(rec, currentMonthKey);
+                            const isDisapproved = rec.clStatus === 'disapproved';
+                            const wasAutoCovered = isApproved && !rec.clStatus;
+                            return (
+                              <tr key={rec.date + rec.personId} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
+                                <td className="px-4 py-3 font-mono text-cyan-400 text-sm">{rec.date}</td>
+                                <td className="px-4 py-3 text-sm text-gray-400">{new Date(rec.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' })}</td>
+                                <td className="px-4 py-3 text-sm">
+                                  {isApproved ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold"><FiCheck size={12} /> {wasAutoCovered ? 'Covered — CL used (past month)' : 'Approved — CL used'}</span>
+                                  ) : isDisapproved ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold"><FiX size={12} /> Disapproved — deducted</span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-semibold"><FiClock size={12} /> Pending</span>
+                                  )}
                                 </td>
-                              )}
-                            </tr>
-                          ))}
+                                <td className="px-4 py-3">
+                                  {!isReadOnly && (
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => setClApproval(rec, 'approved')}
+                                        disabled={isApproved}
+                                        title="Approve — use 1 CL, no salary deduction"
+                                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${isApproved ? 'bg-emerald-500/20 text-emerald-400 cursor-default' : 'bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400'}`}
+                                      >
+                                        <FiCheck size={12} /> Approve
+                                      </button>
+                                      <button
+                                        onClick={() => setClApproval(rec, 'disapproved')}
+                                        disabled={isDisapproved}
+                                        title="Disapprove — deduct salary for this day"
+                                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${isDisapproved ? 'bg-red-500/20 text-red-400 cursor-default' : 'bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400'}`}
+                                      >
+                                        <FiX size={12} /> Disapprove
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1597,7 +1231,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             {!clViewEmpId && (
               <div className="text-center py-10">
                 <div className="text-5xl mb-3">📋</div>
-                <p className="text-gray-500">Select an employee to view their casual leave balance.</p>
+                <p className="text-gray-500">Select an employee to approve/disapprove absences and view their CL balance.</p>
               </div>
             )}
           </div>

@@ -67,9 +67,10 @@ export interface Attendance {
   personName: string;
   personType: 'student' | 'employee';
   date: string;
-  status: 'present' | 'absent' | 'holiday';
+  status: 'present' | 'late' | 'absent' | 'holiday';
   class?: string;
   role?: string;
+  clStatus?: 'approved' | 'disapproved';
   causalLeaves?: CausalLeave[];
 }
 

@@ -14,11 +14,11 @@ import {
   addExpense, getExpenses, updateExpense, deleteExpense,
   addEmployee, getEmployees, updateEmployee, deleteEmployee,
   addEquipment, getEquipments, updateEquipment, deleteEquipment,
-  saveBatchAttendance, saveAttendance, getAttendance, deleteAttendance,
+  saveAttendance, getAttendance, deleteAttendance,
   addHoliday, getHolidays, deleteHoliday,
   getNextSequentialId,
   uploadImage, generateAutoId,
-  addCausalLeave, getCausalLeaves, deleteCausalLeave, logSalarySlipAudit,
+  logSalarySlipAudit,
   addSubject, getSubjects, updateSubject, deleteSubject,
   saveTeacherSubjects, getTeacherSubjects, deleteTeacherSubject,
   saveTimetableEntries, getTimetableEntries, deleteTimetableForClass, deleteTimetableEntry,
@@ -35,47 +35,7 @@ import AIAssistant from './components/AIAssistant';
 
 type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai';
 
-const getEmpClQuota = (emp?: Employee | null) => {
-  const global = Math.max(0, parseInt(localStorage.getItem('clQuota') || '12'));
-  return emp?.clQuota && emp.clQuota > 0 ? emp.clQuota : global;
-};
-
-const getClMonthlyLimit = (emp: Employee | undefined | null) => {
-  return emp?.clAllowance && emp.clAllowance > 0 ? emp.clAllowance : 0;
-};
-
-// Per-month cap applies only to current/future months — old entries are never affected.
-const getMonthCap = (monthKey: string, monthLim: number, annualQuota: number) => {
-  const now = new Date();
-  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  if (monthKey < cur) return annualQuota;
-  return monthLim > 0 ? monthLim : annualQuota;
-};
-
-const getAcademicYearStart = (monthKey: string) => {
-  const [, month] = monthKey.split('-').map(Number);
-  const year = parseInt(monthKey.substring(0, 4));
-  const startYear = month >= 6 ? year : year - 1;
-  return `${startYear}-06`;
-};
-
-// CL is never refreshed monthly. Unused CL carries forward to the next month.
-// CL used before the given month = absences auto-covered by CL in all prior months of the academic year.
-const getCLUsedBeforeMonth = (empId: string, monthKey: string, allAttendance: Att[], _monthlyLimit: number, annualQuota: number) => {
-  const [y0, m0] = getAcademicYearStart(monthKey).split('-').map(Number);
-  const [y1, m1] = monthKey.split('-').map(Number);
-  let used = 0;
-  let y = y0, m = m0;
-  while (y < y1 || (y === y1 && m < m1)) {
-    const mk = `${y}-${String(m).padStart(2, '0')}`;
-    const absents = allAttendance.filter(a => a.personId === empId && a.date.startsWith(mk) && a.status === 'absent').length;
-    used += Math.min(absents, Math.max(0, annualQuota - used));
-    m++;
-    if (m > 12) { m = 1; y++; }
-    if (used >= annualQuota) break;
-  }
-  return used;
-};
+import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered } from './clUtils';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -182,6 +142,10 @@ const App: React.FC = () => {
   const [deductMonth, setDeductMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const [deductAmount, setDeductAmount] = useState('');
   const [uiTheme, setUiTheme] = useState<'blackblue' | 'wrb'>(() => (localStorage.getItem('uiTheme') === 'wrb' ? 'wrb' : 'blackblue'));
+  const [summaryYear, setSummaryYear] = useState<number>(new Date().getFullYear());
+  const [reportFees, setReportFees] = useState<Fee[]>([]);
+  const [reportExpenses, setReportExpenses] = useState<Expense[]>([]);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', uiTheme);
     localStorage.setItem('uiTheme', uiTheme);
@@ -663,6 +627,21 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('schoolDocumentOptions', JSON.stringify(documentOptions)); }, [documentOptions]);
   useEffect(() => { localStorage.setItem('schoolSettings', JSON.stringify(schoolSettings)); }, [schoolSettings]);
   useEffect(() => { setShowAllStudents(false); setShowAllFees(false); setShowAllFeesByStudent(false); setShowAllExpenses(false); setShowAllEmployees(false); }, [searchTerm]);
+
+  // Filter locally loaded fees/expenses by year (dates stored as YYYY-MM-DD strings)
+  const fetchReportData = useCallback((year: number) => {
+    const yearStr = String(year);
+    setReportFees(fees.filter((f: Fee) => {
+      const d = (f.paidDate || f.dueDate || '');
+      return d.startsWith(yearStr);
+    }));
+    setReportExpenses(expenses.filter((e: Expense) => {
+      const d = (e.date || '');
+      return d.startsWith(yearStr);
+    }));
+  }, [fees, expenses]);
+
+  useEffect(() => { fetchReportData(summaryYear); }, [summaryYear, fetchReportData]);
 
   const getCurrentYearData = (data: any[]) => { const cy = new Date().getFullYear(); return data.filter(item => { const d = item.date || item.dueDate || item.paidDate; return !d || new Date(d).getFullYear() === cy; }); };
   const getEffectiveFeeStatus = (fee: Fee): 'paid' | 'pending' | 'overdue' => {
@@ -1290,7 +1269,9 @@ const App: React.FC = () => {
 
       const empAttendance = sd ? [] : attendance.filter(a => a.personId === emp.autoId && a.date.startsWith(currentMonth));
       const presentDays = sd ? sd.attendance.presentDays : empAttendance.filter(a => a.status === 'present').length;
-      const absentDays = sd ? sd.attendance.absentDays : empAttendance.filter(a => a.status === 'absent').length;
+      const lateDays = sd ? 0 : empAttendance.filter(a => a.status === 'late').length;
+      const clCovered = sd ? 0 : empAttendance.filter(a => isClCovered(a, currentMonth)).length;
+      const absentDays = sd ? sd.attendance.absentDays : empAttendance.filter(a => a.status === 'absent' && !isClCovered(a, currentMonth)).length;
 
       const [year, month] = currentMonth.split('-').map(Number);
       const daysInMonth = new Date(year, month, 0).getDate();
@@ -1307,20 +1288,18 @@ const App: React.FC = () => {
 
       const monthlySalary = sd ? sd.salary.monthlyGross : ((emp.monthSalary?.[currentMonth] ?? emp.salary) || 0);
       const perDaySalary = sd ? sd.salary.perDaySalary : (workingDays > 0 ? monthlySalary / workingDays : 0);
-      const earnedSalary = sd ? sd.salary.earnedSalary : Math.round(presentDays * perDaySalary);
+      const earnedSalary = sd ? sd.salary.earnedSalary : Math.round((presentDays + lateDays + clCovered) * perDaySalary);
 
-      // CL annual quota with monthly limit
+      // CL annual quota (manual approval system — no monthly limit)
       const annualQuota = getEmpClQuota(emp);
-      const monthLim = getClMonthlyLimit(emp);
       let clUsedNum = 0, clRemainingNum = 0;
       if (sd) {
         clUsedNum = sd.attendance.casualLeavesUsed;
         clRemainingNum = sd.attendance.casualLeavesRemaining;
       } else {
-        const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
-        const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-        clUsedNum = Math.min(absentDays, getMonthCap(currentMonth, monthLim, annualQuota), remainingAnnual);
-        clRemainingNum = Math.max(0, remainingAnnual - clUsedNum);
+        const usedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
+        clUsedNum = usedTotal;
+        clRemainingNum = Math.max(0, annualQuota - usedTotal);
       }
 
       // ── CSS-derived design tokens (from SalarySlip.css) ──
@@ -1545,7 +1524,9 @@ const App: React.FC = () => {
     const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const empAttendance = attendance.filter(a => a.personId === emp.autoId && a.date.startsWith(currentMonth));
     const presentDays = empAttendance.filter(a => a.status === 'present').length;
-    const absentDays = empAttendance.filter(a => a.status === 'absent').length;
+    const lateDays = empAttendance.filter(a => a.status === 'late').length;
+    const clCovered = empAttendance.filter(a => isClCovered(a, currentMonth)).length;
+    const absentDays = empAttendance.filter(a => a.status === 'absent' && !isClCovered(a, currentMonth)).length;
     const [year, month] = currentMonth.split('-').map(Number);
     const daysInMonth = new Date(year, month, 0).getDate();
     let workingDays = 0;
@@ -1558,15 +1539,10 @@ const App: React.FC = () => {
     }
     const monthlySalary = (emp.monthSalary?.[currentMonth] ?? emp.salary) || 0;
     const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
-    const earnedSalary = Math.round(presentDays * perDaySalary);
+    const earnedSalary = Math.round((presentDays + lateDays + clCovered) * perDaySalary);
     const annualQuota = getEmpClQuota(emp);
-    const monthLim = getClMonthlyLimit(emp);
-    const usedBefore = getCLUsedBeforeMonth(emp.autoId, currentMonth, attendance, monthLim, annualQuota);
-    const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-    const autoCover = Math.min(absentDays, getMonthCap(currentMonth, monthLim, annualQuota), remainingAnnual);
-    const effectiveAbsent = Math.max(0, absentDays - autoCover);
-    const effectivePresent = presentDays + autoCover;
-    const effectiveEarnedSalary = Math.round(effectivePresent * perDaySalary);
+    const usedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
+    const remainingAnnual = Math.max(0, annualQuota - usedTotal);
     return {
       school: {
         name: (schoolSettings?.schoolName || 'School OS').toUpperCase(),
@@ -1587,14 +1563,14 @@ const App: React.FC = () => {
       attendance: {
         workingDays,
         presentDays,
-        absentDays: effectiveAbsent,
-        casualLeavesUsed: autoCover,
-        casualLeavesRemaining: Math.max(0, remainingAnnual - autoCover),
+        absentDays,
+        casualLeavesUsed: usedTotal,
+        casualLeavesRemaining: remainingAnnual,
       },
       salary: {
         monthlyGross: monthlySalary,
         perDaySalary: Math.round(perDaySalary),
-        earnedSalary: effectiveEarnedSalary,
+        earnedSalary,
         allowances: 0,
         deductions: (emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0,
       },
@@ -1615,14 +1591,7 @@ const App: React.FC = () => {
       for (let idx = 0; idx < activeEmps.length; idx++) {
         const emp = activeEmps[idx];
         if (idx > 0) doc.addPage();
-        let clCount = 0;
-        if (!salaryData) {
-          try {
-            const cl = await getCausalLeaves(emp.autoId);
-            clCount = Array.isArray(cl) ? cl.length : 0;
-          } catch {}
-        }
-        drawSalarySlipPDF(doc, emp, currentMonth, monthName, clCount, salaryData);
+        drawSalarySlipPDF(doc, emp, currentMonth, monthName, 0, salaryData);
         if (singleEmp && logSalarySlipAudit) {
           try { await logSalarySlipAudit(emp.autoId); } catch {}
         }
@@ -1667,7 +1636,7 @@ const App: React.FC = () => {
     const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
 
     let grandTotal = 0;
-    const empMonthRows: { name: string; role: string; month: string; workingDays: number; presentDays: number; autoCover: number; clLeft: number; earnedSalary: number }[] = [];
+    const empMonthRows: { name: string; role: string; month: string; workingDays: number; presentDays: number; clUsed: number; clLeft: number; earnedSalary: number }[] = [];
     let y = 12;
     const cX = (pct: number) => ML + 2 + CW * pct / 100;
 
@@ -1676,7 +1645,9 @@ const App: React.FC = () => {
       const daysInMonth = new Date(yr, mo, 0).getDate();
       const empAttendance = attendance.filter(a => a.personId === emp.autoId && a.date.startsWith(month));
       const presentDays = empAttendance.filter(a => a.status === 'present').length;
-      const absentDays = empAttendance.filter(a => a.status === 'absent').length;
+      const lateDays = empAttendance.filter(a => a.status === 'late').length;
+      const clCovered = empAttendance.filter(a => isClCovered(a, month)).length;
+      const absentDays = empAttendance.filter(a => a.status === 'absent' && !isClCovered(a, month)).length;
       const monthlySalary = (emp.monthSalary?.[month] ?? emp.salary) || 0;
       let workingDays = 0;
       for (let day = 1; day <= daysInMonth; day++) {
@@ -1686,16 +1657,15 @@ const App: React.FC = () => {
         if (hList.some(h => h && h.date === ds && h.type === 'manual')) continue;
         workingDays++;
       }
-      const perDaySalary = monthlySalary / (workingDays || 1);
-      const annualQuota = getEmpClQuota(emp);
-      const monthLim = getClMonthlyLimit(emp);
-      const usedBefore = getCLUsedBeforeMonth(emp.autoId, month, attendance, monthLim, annualQuota);
-      const remainingAnnual = Math.max(0, annualQuota - usedBefore);
-      const autoCover = Math.min(absentDays, getMonthCap(month, monthLim, annualQuota), remainingAnnual);
-      const effPresent = presentDays + autoCover;
-      const effAbsent = Math.max(0, absentDays - autoCover);
-      const earnedSalary = Math.round(effPresent * perDaySalary);
-      const clLeft = Math.max(0, remainingAnnual - autoCover);
+    const perDaySalary = monthlySalary / (workingDays || 1);
+    const annualQuota = getEmpClQuota(emp);
+    const usedTotal = getClUsedTotal(emp.autoId, month, attendance);
+    const remainingAnnual = Math.max(0, annualQuota - usedTotal);
+    const clUsed = usedTotal;
+    const effPresent = presentDays + lateDays + clCovered;
+    const effAbsent = absentDays;
+    const earnedSalary = Math.round(effPresent * perDaySalary);
+    const clLeft = Math.max(0, remainingAnnual);
 
       // Build daily grid only for visual (mark only days with actual attendance records)
       const daily: { day: number; status: string }[] = [];
@@ -1709,7 +1679,7 @@ const App: React.FC = () => {
         daily.push({ day, status });
       }
 
-      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary, earnedSalary, autoCover, clLeft, effAbsent, daysInMonth };
+      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary, earnedSalary, clUsed, clLeft, effAbsent, daysInMonth };
     };
 
     const drawPageHeader = () => {
@@ -1746,7 +1716,7 @@ const App: React.FC = () => {
       const monthEmps = reportEmps.filter(emp => isActiveInMonth(emp, month)).map(emp => {
         const att = buildAttendance(emp, month);
         grandTotal += att.earnedSalary;
-        empMonthRows.push({ name: emp.name, role: emp.role || '-', month, workingDays: att.workingDays, presentDays: att.presentDays, autoCover: att.autoCover, clLeft: att.clLeft, earnedSalary: att.earnedSalary });
+        empMonthRows.push({ name: emp.name, role: emp.role || '-', month, workingDays: att.workingDays, presentDays: att.presentDays, clUsed: att.clUsed, clLeft: att.clLeft, earnedSalary: att.earnedSalary });
         return { name: emp.name, ...att };
       });
       const monthTotal = monthEmps.reduce((s, e) => s + e.earnedSalary, 0);
@@ -1791,7 +1761,7 @@ const App: React.FC = () => {
         if (e.absentDays > e.autoCover) doc.setTextColor(220, 38, 38); else doc.setTextColor(...sTextSec);
         doc.text(String(e.absentDays), colAD, y + 4.5);
         doc.setTextColor(6, 182, 212);
-        doc.text(String(e.autoCover), colCLU, y + 4.5);
+        doc.text(String(e.clUsed), colCLU, y + 4.5);
         doc.setTextColor(...sTextSec);
         doc.text(String(e.clLeft), clCLL, y + 4.5);
         doc.text(String(e.workingDays), colWD, y + 4.5);
@@ -1851,7 +1821,7 @@ const App: React.FC = () => {
         doc.text(mn, cX(24), y + 4.5);
         doc.text(String(r.workingDays), cX(38), y + 4.5);
         doc.text(String(r.presentDays), cX(46), y + 4.5);
-        doc.text(String(r.autoCover), cX(54), y + 4.5);
+        doc.text(String(r.clUsed), cX(54), y + 4.5);
         doc.text(String(r.clLeft), cX(62), y + 4.5);
         doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
         doc.text(money(r.earnedSalary), MR - 2, y + 4.5, { align: 'right' });
@@ -2149,6 +2119,125 @@ const App: React.FC = () => {
     pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
     doc.save('Fees_Collection_Report.pdf');
     showNotification('Fees collection report PDF exported', 'success');
+  };
+
+  const exportMonthlyFinancialSummaryPDF = () => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pw = 210, ph = 297, ML = 10, MR = pw - 10, CW = MR - ML;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const bodySize = schoolSettings.pdfBodySize || 9;
+    const monthsArr = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const sy = summaryYear;
+    const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
+    const parseMonth = (dateStr: string) => {
+      if (!dateStr || dateStr.length < 7) return -1;
+      return parseInt(dateStr.substring(5, 7), 10) - 1;
+    };
+
+    // Header band
+    doc.setFillColor(...c.primary);
+    doc.rect(0, 0, pw, 22, 'F');
+    let textX = 10;
+    if (schoolSettings.schoolLogo) {
+      try { doc.addImage(schoolSettings.schoolLogo, 'PNG', 10, 3, 16, 16); textX = 30; } catch (e) {}
+    }
+    doc.setTextColor(...c.white);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+    doc.text((schoolSettings.schoolName || 'School OS').toUpperCase(), textX, 11);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+    doc.text('Monthly Financial Summary', textX, 18);
+    doc.setFontSize(7.5);
+    doc.text(new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), MR - 8, 11, { align: 'right' });
+    doc.text(`Year: ${sy}`, MR - 8, 18, { align: 'right' });
+
+    const allFeesPaid = reportFees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid');
+    const sySalaryExpenses = reportExpenses.filter((e: Expense) => e.category === 'Salaries');
+    const syOtherExpenses = reportExpenses.filter((e: Expense) => e.category !== 'Salaries');
+
+    const monthRows: { month: string; fees: number; salary: number; otherExp: number; totalExp: number; net: number }[] = [];
+    let grandFees = 0, grandSalary = 0, grandOther = 0, grandTotal = 0, grandNet = 0;
+    monthsArr.forEach((m, i) => {
+      const feesAmt = allFeesPaid.filter((f: Fee) => parseMonth(f.paidDate || f.dueDate) === i).reduce((s: number, f: Fee) => s + f.amount, 0);
+      const salaryAmt = sySalaryExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
+      const otherAmt = syOtherExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
+      const totalExp = salaryAmt + otherAmt;
+      const net = feesAmt - totalExp;
+      if (feesAmt > 0 || totalExp > 0) {
+        monthRows.push({ month: m, fees: feesAmt, salary: salaryAmt, otherExp: otherAmt, totalExp, net });
+        grandFees += feesAmt; grandSalary += salaryAmt; grandOther += otherAmt; grandTotal += totalExp; grandNet += net;
+      }
+    });
+
+    autoTable(doc, {
+      head: [['Month', 'Collection (Fees)', 'Salary Expense', 'Other Expenses', 'Total Expenses', 'Net (In - Out)']],
+      body: monthRows.map(r => [
+        r.month + ' ' + sy,
+        money(r.fees),
+        money(r.salary),
+        money(r.otherExp),
+        money(r.totalExp),
+        money(r.net),
+      ]),
+      foot: [[
+        'TOTAL', money(grandFees), money(grandSalary), money(grandOther), money(grandTotal), money(grandNet),
+      ]],
+      startY: 30,
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: bodySize, cellPadding: 4, halign: 'center' },
+      bodyStyles: { textColor: [30, 41, 59], fontSize: bodySize, cellPadding: 3, halign: 'right' },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      footStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: bodySize, cellPadding: 4, halign: 'right' },
+      columnStyles: {
+        0: { cellWidth: 35, halign: 'left', fontStyle: 'bold' },
+        1: { textColor: [16, 185, 129] },
+        2: { textColor: [234, 88, 12] },
+        3: { textColor: [147, 51, 234] },
+        4: { textColor: [220, 38, 38] },
+        5: { fontStyle: 'bold' },
+      },
+      margin: { left: ML, right: ML },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 5) {
+          const raw = String(data.cell.raw || '');
+          const isNeg = raw.includes('-');
+          data.cell.styles.textColor = isNeg ? [220, 38, 38] : [16, 185, 129];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    });
+
+    const tableEnd = (doc as any).lastAutoTable?.finalY || 50;
+    const cardY = tableEnd + 10;
+    const cardH = 22;
+    const cardGap = 6;
+    const cardCount = 3;
+    const cardW = (CW - cardGap * (cardCount - 1)) / cardCount;
+
+    const summaryCards: [string, number, [number, number, number]][] = [
+      ['Total Collection', grandFees, [16, 185, 129]],
+      ['Total Expenses', grandTotal, [220, 38, 38]],
+      ['Net Revenue', grandNet, grandNet >= 0 ? [16, 185, 129] : [220, 38, 38]],
+    ];
+
+    summaryCards.forEach(([label, value, color], i) => {
+      const cx = ML + i * (cardW + cardGap);
+      doc.setFillColor(...c.lighter); doc.setDrawColor(...c.border); doc.setLineWidth(0.2);
+      doc.roundedRect(cx, cardY, cardW, cardH, 3, 3, 'FD');
+      doc.setFillColor(color[0], color[1], color[2]); doc.roundedRect(cx, cardY, cardW, 2.5, 1.5, 1.5, 'F');
+      doc.setTextColor(color[0], color[1], color[2]); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      doc.text(label, cx + cardW / 2, cardY + 9, { align: 'center' });
+      doc.setTextColor(...c.dark); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+      doc.text(money(value), cx + cardW / 2, cardY + 17, { align: 'center' });
+    });
+
+    const pageCount = doc.getNumberOfPages();
+    for (let p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      pdfFooter(doc, pw, ph, schoolSettings, p, pageCount);
+    }
+
+    doc.save(`Monthly_Financial_Summary_${sy}.pdf`);
+    showNotification('Monthly financial summary PDF exported', 'success');
   };
 
   const exportFinancialReportPDF = () => {
@@ -3797,21 +3886,17 @@ const App: React.FC = () => {
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
           <AttendanceSection
-            students={students}
             employees={employees}
             attendance={attendance}
             holidays={holidays}
+            expenses={expenses}
             schoolSettings={schoolSettings}
             isReadOnly={isReadOnly}
-            saveBatchAttendance={saveBatchAttendance}
             saveAttendance={saveAttendance}
             addHoliday={addHoliday}
             deleteHoliday={deleteHoliday}
             showNotification={showNotification}
             loadData={loadData}
-            addCausalLeave={addCausalLeave}
-            getCausalLeaves={getCausalLeaves}
-            deleteCausalLeave={deleteCausalLeave}
             logSalarySlipAudit={logSalarySlipAudit}
             updateEmployee={updateEmployee}
             handleDirectSalaryPay={handleDirectSalaryPay}
@@ -4332,6 +4417,91 @@ const App: React.FC = () => {
               </div>
             </div>
 
+            {/* Row 1b: Month-wise Financial Summary Table */}
+            {(() => {
+              const sy = summaryYear;
+              const allFeesPaid = reportFees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid');
+              const allExpensesForYear = reportExpenses;
+              const sySalaryExpenses = allExpensesForYear.filter((e: Expense) => e.category === 'Salaries');
+              const syOtherExpenses = allExpensesForYear.filter((e: Expense) => e.category !== 'Salaries');
+              const syTotalFees = allFeesPaid.reduce((s: number, f: Fee) => s + f.amount, 0);
+              const syTotalSalary = sySalaryExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
+              const syTotalOther = syOtherExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
+              const syTotalExpenses = syTotalSalary + syTotalOther;
+              const syNet = syTotalFees - syTotalExpenses;
+
+              const parseYear = (d: string) => d ? parseInt(d.substring(0, 4), 10) : 0;
+              const parseMonth = (d: string) => d && d.length >= 7 ? parseInt(d.substring(5, 7), 10) - 1 : -1;
+              const availableYears = [...new Set([
+                ...fees.map((f: Fee) => parseYear(f.paidDate || f.dueDate)),
+                ...expenses.map((e: Expense) => parseYear(e.date))
+              ])].filter(y => y > 0).sort((a: number, b: number) => b - a);
+              if (availableYears.length === 0) availableYears.push(new Date().getFullYear());
+
+              return (
+            <div className="bg-[#1E1E1E] p-6 rounded-2xl border border-gray-800">
+              <div className="flex flex-col md:flex-row justify-between md:items-center gap-3 mb-6">
+                <h3 className="text-lg font-bold flex items-center gap-2"><FiBarChart2 className="text-cyan-400" />Month-wise Financial Summary</h3>
+                <div className="flex items-center gap-3">
+
+                  <select
+                    value={summaryYear}
+                    onChange={e => setSummaryYear(Number(e.target.value))}
+                    className="p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm font-semibold"
+                  >
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-cyan-400">Month</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-emerald-400">Collection (Fees)</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-orange-400">Salary Expense</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-purple-400">Other Expenses</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-red-400">Total Expenses</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-cyan-400">Net (In - Out)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthsArr.map((m, i) => {
+                      const mFees = allFeesPaid.filter((f: Fee) => parseMonth(f.paidDate || f.dueDate) === i).reduce((s: number, f: Fee) => s + f.amount, 0);
+                      const mSalary = sySalaryExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
+                      const mOther = syOtherExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
+                      const mTotal = mSalary + mOther;
+                      const mNet = mFees - mTotal;
+                      const hasData = mFees > 0 || mTotal > 0;
+                      if (!hasData) return null;
+                      return (
+                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/20 transition">
+                          <td className="px-4 py-3"><span className="font-semibold text-white">{m}</span><span className="text-gray-500 text-xs ml-1">{sy}</span></td>
+                          <td className="px-4 py-3 text-right"><span className="text-emerald-400 font-semibold">₹{mFees.toLocaleString()}</span></td>
+                          <td className="px-4 py-3 text-right"><span className="text-orange-400 font-semibold">₹{mSalary.toLocaleString()}</span></td>
+                          <td className="px-4 py-3 text-right"><span className="text-purple-400 font-semibold">₹{mOther.toLocaleString()}</span></td>
+                          <td className="px-4 py-3 text-right"><span className="text-red-400 font-semibold">₹{mTotal.toLocaleString()}</span></td>
+                          <td className="px-4 py-3 text-right"><span className={`font-bold ${mNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>₹{mNet.toLocaleString()}</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-cyan-500/30 bg-gray-800/30">
+                      <td className="px-4 py-3"><span className="font-bold text-cyan-400">TOTAL</span></td>
+                      <td className="px-4 py-3 text-right"><span className="font-bold text-emerald-400">₹{syTotalFees.toLocaleString()}</span></td>
+                      <td className="px-4 py-3 text-right"><span className="font-bold text-orange-400">₹{syTotalSalary.toLocaleString()}</span></td>
+                      <td className="px-4 py-3 text-right"><span className="font-bold text-purple-400">₹{syTotalOther.toLocaleString()}</span></td>
+                      <td className="px-4 py-3 text-right"><span className="font-bold text-red-400">₹{syTotalExpenses.toLocaleString()}</span></td>
+                      <td className="px-4 py-3 text-right"><span className={`font-bold ${syNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>₹{syNet.toLocaleString()}</span></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+              );
+            })()}
+
             {/* Row 2: Revenue vs Expenses (Area Chart) */}
             <div className="bg-[#1E1E1E] p-6 rounded-2xl border border-gray-800">
               <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><FiBarChart2 className="text-cyan-400" />Revenue vs Expenses - {cy}</h3>
@@ -4440,6 +4610,7 @@ const App: React.FC = () => {
               <button onClick={() => exportFinancialReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Report (PDF)</button>
               <button onClick={() => exportEmployeeListPDF()} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Employee List (PDF)</button>
               <button onClick={() => exportFeesCollectionReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Fees Collection (PDF)</button>
+              <button onClick={() => exportMonthlyFinancialSummaryPDF()} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Monthly Financial Summary (PDF)</button>
             </div>
           </div>
         )}

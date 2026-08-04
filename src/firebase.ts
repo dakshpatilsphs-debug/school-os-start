@@ -133,10 +133,17 @@ const sanitizeKey = (s: string) => s.replace(/[.#$\[\]\/]/g, '-'); // RTDB-safe 
 const makeAttKey = (personId: string, date: string) => sanitizeKey(`${personId}_${date}`);
 
 // Save or update a single attendance record (person + date = unique)
+// Resilient: tries RTDB first, auto-falls back to Firestore if RTDB unavailable.
+// Returns { key, source } so callers know where the record was stored.
 export const saveAttendance = async (record: any) => {
   const key = makeAttKey(record.personId, record.date);
-  await rtdbSet(dbRef(rtdb, `attendance/${key}`), cleanData({ ...record, createdAt: Date.now() }));
-  return key;
+  try {
+    await rtdbSet(dbRef(rtdb, `attendance/${key}`), cleanData({ ...record, createdAt: Date.now() }));
+    return { key, source: 'rtdb' };
+  } catch (rtdbErr) {
+    await setDoc(doc(db, 'attendance', key), cleanData({ ...record, createdAt: Timestamp.now() }));
+    return { key, source: 'firestore' };
+  }
 };
 
 // Batch save attendance (for marking whole class/employees at once)
@@ -337,6 +344,77 @@ export const getNextSequentialId = async (collectionName: string): Promise<numbe
     return num > max ? num : max;
   }, 0);
   return maxNum + 1;
+};
+
+// ===== Date-Range Query Functions (for Reports) =====
+// Fetches fees where paidDate OR dueDate falls within [start, end] range.
+// Firestore can't OR across fields, so we run two queries and merge.
+export const getFeesByDateRange = async (startDate: string, endDate: string): Promise<any[]> => {
+  const startStr = startDate; // YYYY-MM-DD
+  const endStr = endDate;     // YYYY-MM-DD
+
+  // Query 1: fees by paidDate in range
+  const qPaid = query(
+    collection(db, 'fees'),
+    where('paidDate', '>=', startStr),
+    where('paidDate', '<=', endStr),
+    orderBy('paidDate', 'asc')
+  );
+
+  // Query 2: fees by dueDate in range (catches pending/overdue fees)
+  const qDue = query(
+    collection(db, 'fees'),
+    where('dueDate', '>=', startStr),
+    where('dueDate', '<=', endStr),
+    orderBy('dueDate', 'asc')
+  );
+
+  const [snapPaid, snapDue] = await Promise.all([
+    getDocs(qPaid).catch(() => ({ docs: [] as any[] })),
+    getDocs(qDue).catch(() => ({ docs: [] as any[] })),
+  ]);
+
+  // Merge and deduplicate by document id
+  const seen = new Set<string>();
+  const results: any[] = [];
+  [...snapPaid.docs, ...snapDue.docs].forEach(d => {
+    if (!seen.has(d.id)) {
+      seen.add(d.id);
+      results.push({ id: d.id, ...d.data() });
+    }
+  });
+
+  return results;
+};
+
+// Fetch expenses where date falls within [start, end] range.
+export const getExpensesByDateRange = async (startDate: string, endDate: string): Promise<any[]> => {
+  const q = query(
+    collection(db, 'expenses'),
+    where('date', '>=', startDate),
+    where('date', '<=', endDate),
+    orderBy('date', 'asc')
+  );
+  const snapshot = await getDocs(q).catch(() => ({ docs: [] as any[] }));
+  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+};
+
+// Fetch fees for a specific month (year + month number 0-11)
+export const getFeesByMonth = async (year: number, month: number): Promise<any[]> => {
+  const mm = String(month + 1).padStart(2, '0');
+  const start = `${year}-${mm}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const end = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+  return getFeesByDateRange(start, end);
+};
+
+// Fetch expenses for a specific month (year + month number 0-11)
+export const getExpensesByMonth = async (year: number, month: number): Promise<any[]> => {
+  const mm = String(month + 1).padStart(2, '0');
+  const start = `${year}-${mm}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const end = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+  return getExpensesByDateRange(start, end);
 };
 // ===== Equipment Functions =====
 export const addEquipment = async (equipment: any) =>
