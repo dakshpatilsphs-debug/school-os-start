@@ -31,6 +31,7 @@ export interface Fee {
 export interface Expense {
   id?: string; autoId: string; category: string; amount: number; description: string;
   date: string; paidTo: string; employeeId?: string; status: 'paid' | 'pending'; billUrl?: string;
+  salaryMonth?: string;
 }
 export interface Employee {
   id?: string;

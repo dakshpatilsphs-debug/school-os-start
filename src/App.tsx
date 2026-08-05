@@ -156,7 +156,7 @@ const App: React.FC = () => {
   const [feeClassFilter, setFeeClassFilter] = useState('');
   const [forceFeeForm, setForceFeeForm] = useState(false);
 
-  const [expenseForm, setExpenseForm] = useState<Expense>({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' });
+  const [expenseForm, setExpenseForm] = useState<Expense>({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' });
   const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '', otherDeduction: 0 } as any);
   const [equipmentForm, setEquipmentForm] = useState<Equipment>({ autoId: generateAutoId('Q'), name: '', category: 'Furniture', assignedToType: 'school', assignedToId: '', assignedToName: 'School', quantity: 1, condition: 'Good', purchaseDate: '', value: 0, status: 'Pending', notes: '' });
   const [equipmentPersonTypeFilter, setEquipmentPersonTypeFilter] = useState<'all' | 'student' | 'teacher'>('all');
@@ -687,6 +687,16 @@ const App: React.FC = () => {
     const ee = expenses.filter(e => e.employeeId === employee.autoId);
     return { totalPaid: ee.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0), totalPending: ee.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0), expenseCount: ee.length };
   };
+  const getLatestDeductMonth = (employee: Employee): string | undefined => {
+    const md = employee.monthDeduction || {};
+    const keys = Object.keys(md).filter(k => k && /^\d{4}-\d{2}$/.test(k)).sort();
+    return keys.length > 0 ? keys[keys.length - 1] : undefined;
+  };
+  const getLatestEmployeeDeduction = (employee: Employee): { amount: number; month?: string } => {
+    const month = getLatestDeductMonth(employee);
+    if (month && (employee.monthDeduction?.[month] || 0) > 0) return { amount: employee.monthDeduction![month] || 0, month };
+    return { amount: employee.otherDeduction || 0 };
+  };
   // Roll number RESETS per class (10A → 001, 002; 10B → 001, 002)
   const generateRollNumber = (studentClass: string) => {
     if (!studentClass) return '001';
@@ -883,7 +893,7 @@ const App: React.FC = () => {
     } catch (error) { showFirebaseError(error, 'Failed to save fee'); }
   };
   const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); showNotification(`Selected: ${e.name}`, 'success'); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
-  const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); } closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
+  const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); }     closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
   const handleDirectSalaryPay = async (expense: any) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
     try {
@@ -984,7 +994,9 @@ const App: React.FC = () => {
   };
 
   const openDeductPopover = (emp: Employee) => {
-    const cur = emp.monthDeduction?.[deductMonth];
+    const targetMonth = getLatestDeductMonth(emp) || getMonthKey(new Date());
+    setDeductMonth(targetMonth);
+    const cur = emp.monthDeduction?.[targetMonth];
     setDeductPopoverEmpId(emp.id || '');
     setDeductAmount(cur != null ? String(cur) : String(emp.otherDeduction || ''));
   };
@@ -1636,7 +1648,7 @@ const App: React.FC = () => {
     const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
 
     let grandTotal = 0;
-    const empMonthRows: { name: string; role: string; month: string; workingDays: number; presentDays: number; clUsed: number; clLeft: number; earnedSalary: number }[] = [];
+    const empMonthRows: { name: string; role: string; month: string; workingDays: number; presentDays: number; clUsed: number; clLeft: number; earnedSalary: number; deduction: number; netSalary: number }[] = [];
     let y = 12;
     const cX = (pct: number) => ML + 2 + CW * pct / 100;
 
@@ -1666,6 +1678,8 @@ const App: React.FC = () => {
     const effAbsent = absentDays;
     const earnedSalary = Math.round(effPresent * perDaySalary);
     const clLeft = Math.max(0, remainingAnnual);
+    const deduction = (emp.monthDeduction?.[month] ?? emp.otherDeduction) || 0;
+    const netSalary = Math.max(0, earnedSalary - deduction);
 
       // Build daily grid only for visual (mark only days with actual attendance records)
       const daily: { day: number; status: string }[] = [];
@@ -1679,7 +1693,7 @@ const App: React.FC = () => {
         daily.push({ day, status });
       }
 
-      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary, earnedSalary, clUsed, clLeft, effAbsent, daysInMonth };
+      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary, earnedSalary, deduction, netSalary, clUsed, clLeft, effAbsent, daysInMonth };
     };
 
     const drawPageHeader = () => {
@@ -1705,21 +1719,22 @@ const App: React.FC = () => {
 
     // ── Per-month tables ──
     const colName = ML + 2;
-    const colPD = cX(28);
-    const colAD = cX(36);
-    const colCLU = cX(44);
-    const clCLL = cX(52);
-    const colWD = cX(60);
+    const colPD = cX(23);
+    const colAD = cX(31);
+    const colCLU = cX(39);
+    const clCLL = cX(47);
+    const colWD = cX(55);
+    const colDed = cX(64);
 
     months.forEach((month) => {
       const monthName = new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
       const monthEmps = reportEmps.filter(emp => isActiveInMonth(emp, month)).map(emp => {
         const att = buildAttendance(emp, month);
-        grandTotal += att.earnedSalary;
-        empMonthRows.push({ name: emp.name, role: emp.role || '-', month, workingDays: att.workingDays, presentDays: att.presentDays, clUsed: att.clUsed, clLeft: att.clLeft, earnedSalary: att.earnedSalary });
+        grandTotal += att.netSalary;
+        empMonthRows.push({ name: emp.name, role: emp.role || '-', month, workingDays: att.workingDays, presentDays: att.presentDays, clUsed: att.clUsed, clLeft: att.clLeft, earnedSalary: att.earnedSalary, deduction: att.deduction, netSalary: att.netSalary });
         return { name: emp.name, ...att };
       });
-      const monthTotal = monthEmps.reduce((s, e) => s + e.earnedSalary, 0);
+      const monthTotal = monthEmps.reduce((s, e) => s + e.netSalary, 0);
       const rowH = 6.5;
       const monthBlockH = 10 + 9 + monthEmps.length * rowH + 7 + 7;
 
@@ -1746,7 +1761,8 @@ const App: React.FC = () => {
       doc.text('CL.Used', colCLU, y + 5);
       doc.text('CL.Left', clCLL, y + 5);
       doc.text('Work.Dys', colWD, y + 5);
-      doc.text('Earned', MR - 2, y + 5, { align: 'right' });
+      doc.text('Deduct', colDed, y + 5);
+      doc.text('Net', MR - 2, y + 5, { align: 'right' });
       y += 8;
 
       // Employee rows
@@ -1765,8 +1781,10 @@ const App: React.FC = () => {
         doc.setTextColor(...sTextSec);
         doc.text(String(e.clLeft), clCLL, y + 4.5);
         doc.text(String(e.workingDays), colWD, y + 4.5);
+        if (e.deduction > 0) { doc.setTextColor(220, 38, 38); doc.setFont('helvetica', 'bold'); } else { doc.setTextColor(...sTextMuted); }
+        doc.text(money(e.deduction), colDed, y + 4.5);
         doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
-        doc.text(money(e.earnedSalary), MR - 2, y + 4.5, { align: 'right' });
+        doc.text(money(e.netSalary), MR - 2, y + 4.5, { align: 'right' });
         doc.setFont('helvetica', 'normal');
         doc.setDrawColor(...sBorder); doc.setLineWidth(0.03);
         doc.line(ML, y + rowH, MR, y + rowH);
@@ -1801,12 +1819,13 @@ const App: React.FC = () => {
       y += 13;
       doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sTextSec);
       doc.text('Name', colName, y);
-      doc.text('Month', cX(24), y);
-      doc.text('WD', cX(38), y);
-      doc.text('PD', cX(46), y);
-      doc.text('CL.U', cX(54), y);
-      doc.text('CL.L', cX(62), y);
-      doc.text('Earned', MR - 2, y, { align: 'right' });
+      doc.text('Month', cX(19), y);
+      doc.text('WD', cX(31), y);
+      doc.text('PD', cX(39), y);
+      doc.text('CL.U', cX(47), y);
+      doc.text('CL.L', cX(55), y);
+      doc.text('Deduct', cX(64), y);
+      doc.text('Net', MR - 2, y, { align: 'right' });
       y += 1;
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
       doc.line(ML, y, MR, y);
@@ -1818,13 +1837,15 @@ const App: React.FC = () => {
         doc.setTextColor(...sText);
         doc.text(r.name, colName, y + 4.5);
         doc.setTextColor(...sTextSec);
-        doc.text(mn, cX(24), y + 4.5);
-        doc.text(String(r.workingDays), cX(38), y + 4.5);
-        doc.text(String(r.presentDays), cX(46), y + 4.5);
-        doc.text(String(r.clUsed), cX(54), y + 4.5);
-        doc.text(String(r.clLeft), cX(62), y + 4.5);
+        doc.text(mn, cX(19), y + 4.5);
+        doc.text(String(r.workingDays), cX(31), y + 4.5);
+        doc.text(String(r.presentDays), cX(39), y + 4.5);
+        doc.text(String(r.clUsed), cX(47), y + 4.5);
+        doc.text(String(r.clLeft), cX(55), y + 4.5);
+        if (r.deduction > 0) { doc.setTextColor(220, 38, 38); doc.setFont('helvetica', 'bold'); } else { doc.setTextColor(...sTextMuted); }
+        doc.text(money(r.deduction), cX(64), y + 4.5);
         doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimaryDark);
-        doc.text(money(r.earnedSalary), MR - 2, y + 4.5, { align: 'right' });
+        doc.text(money(r.netSalary), MR - 2, y + 4.5, { align: 'right' });
         doc.setFont('helvetica', 'normal');
         y += rowH;
       });
@@ -1835,7 +1856,7 @@ const App: React.FC = () => {
     if (months.length > 0) {
       const monthDist = months.map(m => {
         const rows = empMonthRows.filter(r => r.month === m);
-        const total = rows.reduce((s, r) => s + r.earnedSalary, 0);
+        const total = rows.reduce((s, r) => s + r.netSalary, 0);
         const mn = new Date(m + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
         return { label: mn, employees: rows.length, total };
       });
@@ -2121,6 +2142,138 @@ const App: React.FC = () => {
     showNotification('Fees collection report PDF exported', 'success');
   };
 
+  const exportUnpaidStudentsPDF = () => {
+    const activeStudents = students.filter(s => s.status === 'ACTIVE');
+    if (!activeStudents.length) { showNotification('No active students', 'error'); return; }
+
+    const unpaid = activeStudents.filter(s => getStudentPaymentInfo(s).balance > 0);
+    const partial = unpaid.filter(s => getStudentPaymentInfo(s).totalPaid > 0);
+    const fullyUnpaid = unpaid.filter(s => getStudentPaymentInfo(s).totalPaid === 0);
+    const totalBalance = unpaid.reduce((s, st) => s + getStudentPaymentInfo(st).balance, 0);
+
+    const doc = new jsPDF();
+    const pw = 210, CW = 180, ML = (pw - CW) / 2;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const sText: [number, number, number] = [30, 41, 59];
+
+    pdfHeader(doc, 'Unpaid Students Report', 'Class-wise: partial & unpaid students', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    // Summary card (equal columns like the register): TOTAL | ACTIVE | UNPAID | PARTIAL | BALANCE
+    autoTable(doc, {
+      startY: 30,
+      margin: { left: ML, right: ML },
+      head: [['TOTAL', 'ACTIVE', 'UNPAID', 'PARTIAL', 'BALANCE (Rs)']],
+      body: [[String(students.length), String(activeStudents.length), String(fullyUnpaid.length), String(partial.length), totalBalance.toLocaleString('en-IN')]],
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'center' },
+      bodyStyles: { textColor: sText, fontSize: 10, fontStyle: 'bold', halign: 'center' },
+    });
+
+    let y = (doc as any).lastAutoTable.finalY + 4;
+    const classes = [...new Set(unpaid.map(s => s.class))].sort();
+
+    const studentRows = (list: Student[], startIdx: number) => list.map((st, i) => {
+      const info = getStudentPaymentInfo(st);
+      return [
+        String(startIdx + i + 1),
+        st.autoId,
+        st.name,
+        st.rollNumber || '-',
+        info.totalPackage.toLocaleString('en-IN'),
+        info.totalPaid.toLocaleString('en-IN'),
+        info.balance.toLocaleString('en-IN'),
+        info.paymentStatus,
+      ];
+    });
+
+    const sectionTable = (label: string, list: Student[]) => {
+      if (list.length === 0) return;
+      const fee = list.reduce((s, st) => s + getStudentPaymentInfo(st).totalPackage, 0);
+      const paid = list.reduce((s, st) => s + getStudentPaymentInfo(st).totalPaid, 0);
+      const bal = list.reduce((s, st) => s + getStudentPaymentInfo(st).balance, 0);
+
+      y += 4;
+      if (y > 250) { doc.addPage(); y = 28; }
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(...c.primary);
+      doc.text(`${label} (${list.length})`, ML, y);
+      doc.setFont('helvetica', 'normal');
+      y += 5;
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: ML, right: ML, bottom: 20 },
+        head: [['#', 'ID', 'Student Name', 'Roll', 'Fee (Rs)', 'Paid (Rs)', 'Balance (Rs)', 'Status']],
+        body: studentRows(list, 0),
+        foot: [['', '', `TOTAL (${list.length})`, '', fee.toLocaleString('en-IN'), paid.toLocaleString('en-IN'), bal.toLocaleString('en-IN'), '']],
+        theme: 'grid',
+        headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: 8.5 },
+        bodyStyles: { textColor: sText, fontSize: 8 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        footStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 8.5 },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 24, halign: 'left' },
+          2: { cellWidth: 48, halign: 'left' },
+          3: { cellWidth: 12, halign: 'center' },
+          4: { cellWidth: 20, halign: 'right' },
+          5: { cellWidth: 20, halign: 'right' },
+          6: { cellWidth: 20, halign: 'right' },
+          7: { cellWidth: 28, halign: 'center' },
+        },
+      });
+      y = (doc as any).lastAutoTable.finalY + 4;
+    };
+
+    if (unpaid.length === 0) {
+      doc.setFontSize(10); doc.setTextColor(...sText);
+      doc.text('All active students have cleared their full balance.', ML, y);
+    }
+
+    classes.forEach(cls => {
+      const clsStudents = unpaid.filter(s => s.class === cls);
+      const clsPartial = clsStudents.filter(s => getStudentPaymentInfo(s).totalPaid > 0);
+      const clsUnpaid = clsStudents.filter(s => getStudentPaymentInfo(s).totalPaid === 0);
+
+      y += 4;
+      if (y > 248) { doc.addPage(); y = 28; }
+      doc.setFillColor(...c.primary);
+      doc.roundedRect(ML, y - 6, CW, 7, 1.5, 1.5, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+      doc.text(`Class ${cls}`, ML + 3, y, { baseline: 'middle' });
+      doc.setFont('helvetica', 'normal');
+      y += 10;
+
+      sectionTable('Partially Paid', clsPartial);
+      sectionTable('Unpaid', clsUnpaid);
+    });
+
+    if (unpaid.length > 0) {
+      y += 4;
+      if (y > 250) { doc.addPage(); y = 28; }
+      autoTable(doc, {
+        startY: y,
+        margin: { left: ML, right: ML },
+        head: [['Particulars', 'Amount (Rs)']],
+        body: [
+          ['Partially Paid Students', String(partial.length)],
+          ['Unpaid Students (No Payment)', String(fullyUnpaid.length)],
+          ['Total Unpaid Students', String(unpaid.length)],
+          ['Total Balance', totalBalance.toLocaleString('en-IN')],
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'center' },
+        bodyStyles: { textColor: sText, fontSize: 8 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: { 0: { cellWidth: 130, halign: 'left' }, 1: { cellWidth: 50, halign: 'right' } },
+      });
+    }
+
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save('Unpaid_Students_Report.pdf');
+    showNotification('Unpaid students report PDF exported', 'success');
+  };
+
   const exportMonthlyFinancialSummaryPDF = () => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pw = 210, ph = 297, ML = 10, MR = pw - 10, CW = MR - ML;
@@ -2156,9 +2309,10 @@ const App: React.FC = () => {
 
     const monthRows: { month: string; fees: number; salary: number; otherExp: number; totalExp: number; net: number }[] = [];
     let grandFees = 0, grandSalary = 0, grandOther = 0, grandTotal = 0, grandNet = 0;
+    const salaryMonthIndex = (e: Expense) => e.salaryMonth && e.salaryMonth.length >= 7 ? parseInt(e.salaryMonth.substring(5, 7), 10) - 1 : parseMonth(e.date);
     monthsArr.forEach((m, i) => {
       const feesAmt = allFeesPaid.filter((f: Fee) => parseMonth(f.paidDate || f.dueDate) === i).reduce((s: number, f: Fee) => s + f.amount, 0);
-      const salaryAmt = sySalaryExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
+      const salaryAmt = sySalaryExpenses.filter((e: Expense) => salaryMonthIndex(e) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
       const otherAmt = syOtherExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
       const totalExp = salaryAmt + otherAmt;
       const net = feesAmt - totalExp;
@@ -2238,6 +2392,138 @@ const App: React.FC = () => {
 
     doc.save(`Monthly_Financial_Summary_${sy}.pdf`);
     showNotification('Monthly financial summary PDF exported', 'success');
+  };
+
+  const exportFinancialStatementPDF = () => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pw = 210, ph = 297, ML = 15, MR = pw - 15, CW = MR - ML;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const bodySize = schoolSettings.pdfBodySize || 9;
+    const titleSize = Math.max(14, (schoolSettings.pdfTitleSize || 20) - 4);
+    const sy = summaryYear;
+    const fm = (val: number) => (val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const parseMonth = (dateStr: string) => {
+      if (!dateStr || dateStr.length < 7) return -1;
+      return parseInt(dateStr.substring(5, 7), 10) - 1;
+    };
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const allFeesPaid = reportFees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid');
+    const totalCollection = allFeesPaid.reduce((s: number, f: Fee) => s + f.amount, 0);
+    const salaryExpenses = reportExpenses.filter((e: Expense) => e.category === 'Salaries');
+    const otherExpenses = reportExpenses.filter((e: Expense) => e.category !== 'Salaries');
+    const totalSalary = salaryExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
+    const totalOther = otherExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
+    const totalExpenses = totalSalary + totalOther;
+    const closingBalance = totalCollection - totalExpenses;
+
+    const salaryMonthIndex = (e: Expense) => e.salaryMonth && e.salaryMonth.length >= 7 ? parseInt(e.salaryMonth.substring(5, 7), 10) - 1 : parseMonth(e.date);
+    const salaryByMonth = monthNames.map((name, i) => ({
+      name,
+      amount: salaryExpenses.filter((e: Expense) => salaryMonthIndex(e) === i).reduce((s: number, e: Expense) => s + e.amount, 0),
+    })).filter(m => m.amount > 0);
+
+    // Header band
+    pdfHeader(doc, 'Financial Collection & Expense Report', `Year: ${sy}`, c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    // School address + title block
+    let y = 32;
+    if (schoolSettings.address) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(bodySize); doc.setTextColor(...c.muted);
+      doc.text(schoolSettings.address, pw / 2, y, { align: 'center' }); y += 7;
+    }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(titleSize); doc.setTextColor(...c.dark);
+    doc.text('FINANCIAL COLLECTION & EXPENSE REPORT', pw / 2, y, { align: 'center' }); y += 6;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(bodySize); doc.setTextColor(...c.muted);
+    doc.text('Summary of school fee collection and expenditure', pw / 2, y, { align: 'center' });
+    doc.text(pdfDate(), pw / 2, y + 5, { align: 'center' });
+    y += 14;
+
+    const sectionTitle = (label: string) => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(bodySize + 1); doc.setTextColor(...c.dark);
+      doc.text(label, ML, y);
+      y += 6;
+    };
+
+    const baseTable: any = {
+      theme: 'grid',
+      margin: { left: ML, right: ML },
+      headStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: bodySize, cellPadding: 3 },
+      bodyStyles: { textColor: [...c.dark], fontSize: bodySize, cellPadding: 2.5 },
+      alternateRowStyles: { fillColor: [...c.lighter] },
+      footStyles: { fillColor: [...c.primary], textColor: 255, fontStyle: 'bold', fontSize: bodySize, cellPadding: 3, halign: 'right' },
+    };
+
+    // 1. Summary of Collections & Expenditure
+    sectionTitle('Summary of Collections & Expenditure');
+    autoTable(doc, {
+      ...baseTable,
+      startY: y,
+      head: [['Particulars', 'Amount (Rs)']],
+      body: [
+        ['Total Collection', fm(totalCollection)],
+        ['Total Salary Expenses', fm(totalSalary)],
+        ['Other Expenses', fm(totalOther)],
+        ['Total Expenses', fm(totalExpenses)],
+        ['Closing Balance', fm(closingBalance)],
+      ],
+      columnStyles: { 0: { cellWidth: 90, fontStyle: 'bold' }, 1: { halign: 'right' } },
+    });
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // 2. Salary Expense Details (month-wise)
+    sectionTitle('Salary Expense Details');
+    autoTable(doc, {
+      ...baseTable,
+      startY: y,
+      head: [['Month', 'Salary Amount (Rs)']],
+      body: salaryByMonth.map(m => [`${m.name} Salary`, fm(m.amount)]),
+      foot: [['Total Salary', fm(totalSalary)]],
+      columnStyles: { 0: { cellWidth: 90 }, 1: { halign: 'right' } },
+    });
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // 3. Other Expenses
+    sectionTitle('Other Expenses');
+    autoTable(doc, {
+      ...baseTable,
+      startY: y,
+      head: [['Particulars', 'Amount (Rs)']],
+      body: [['Other Expenses', fm(totalOther)]],
+      columnStyles: { 0: { cellWidth: 90, fontStyle: 'bold' }, 1: { halign: 'right' } },
+    });
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // 4. Financial Position
+    sectionTitle('Financial Position');
+    autoTable(doc, {
+      ...baseTable,
+      startY: y,
+      head: [['Financial Position', 'Amount (Rs)']],
+      body: [
+        ['Total Collection', fm(totalCollection)],
+        ['Less: Total Expenses', fm(totalExpenses)],
+        ['Net Balance Available', fm(closingBalance)],
+      ],
+      columnStyles: { 0: { cellWidth: 90, fontStyle: 'bold' }, 1: { halign: 'right', fontStyle: 'bold' } },
+    });
+    y = (doc as any).lastAutoTable.finalY + 16;
+
+    // 5. Prepared By / Checked & Approved By
+    const sigY = y;
+    const half = ML + CW / 2;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(bodySize); doc.setTextColor(...c.muted);
+    doc.text('Prepared By', ML, sigY);
+    doc.text('Checked / Approved By', half, sigY);
+    doc.setDrawColor(...c.border); doc.setLineWidth(0.3);
+    doc.line(ML, sigY + 22, half - 5, sigY + 22);
+    doc.line(half, sigY + 22, MR, sigY + 22);
+    doc.text('Signature & Date', ML, sigY + 27);
+    doc.text('Signature & Date', half, sigY + 27);
+
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save(`Financial_Statement_${sy}.pdf`);
+    showNotification('Financial statement PDF exported', 'success');
   };
 
   const exportFinancialReportPDF = () => {
@@ -2363,11 +2649,8 @@ const App: React.FC = () => {
       // ── Red theme for expense section ──
       const expRed = [220, 38, 38] as const;
       const expRedLight = [254, 242, 242] as const;
-      const expRedBg = [248, 250, 252] as const;
 
-      const expRowH = 6;
-      const expBlockH = 10 + 9 + allExpenses.length * expRowH + 7 + 7;
-      needPage(expBlockH);
+      needPage(16);
 
       doc.setFillColor(expRedLight[0], expRedLight[1], expRedLight[2]); doc.setDrawColor(...expRed); doc.setLineWidth(0.12);
       doc.rect(ML, y, CW, 9, 'FD');
@@ -2376,48 +2659,31 @@ const App: React.FC = () => {
       doc.text('EXPENSES', ML + 5, y + 6.5);
       doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...sTextSec);
       doc.text('Total: ' + allExpenses.length, MR - 1, y + 6.5, { align: 'right' });
-      y += 11;
+      y += 12;
 
-      doc.setFillColor(255, 247, 237); doc.rect(ML, y, CW, 7, 'F');
-      doc.setDrawColor(...sBorder); doc.setLineWidth(0.05);
-      doc.rect(ML, y, CW, 7, 'S');
-      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...expRed);
-      doc.text('Date', ML + 2, y + 5);
-      doc.text('Category', cX(15), y + 5);
-      doc.text('Description', cX(32), y + 5);
-      doc.text('Paid To', cX(55), y + 5);
-      doc.text('Amount', MR - 2, y + 5, { align: 'right' });
-      y += 8;
-
-      doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-      allExpenses.forEach((e, ei) => {
-        needPage(expRowH + 2);
-        if (ei % 2 === 0) { doc.setFillColor(255, 247, 237); doc.rect(ML, y, CW, expRowH, 'F'); }
-        doc.setTextColor(...sText);
-        doc.text(e.date || '-', ML + 2, y + 4);
-        doc.setTextColor(...sTextSec);
-        const catLabel = isSalary(e.category) ? (e.category + ' - ' + getMonthFromDate(e.date)) : (e.category || '-');
-        doc.text(catLabel, cX(15), y + 4);
-        doc.text(e.description || '-', cX(32), y + 4);
-        doc.text(e.paidTo || '-', cX(55), y + 4);
-        doc.setFont('helvetica', 'bold'); doc.setTextColor(...expRed);
-        doc.text(money(e.amount || 0), MR - 2, y + 4, { align: 'right' });
-        doc.setFont('helvetica', 'normal');
-        doc.setDrawColor(...sBorder); doc.setLineWidth(0.03);
-        doc.line(ML, y + expRowH, MR, y + expRowH);
-        y += expRowH;
+      autoTable(doc, {
+        startY: y,
+        margin: { left: ML, right: ML, bottom: 20 },
+        head: [['Date', 'Category', 'Description', 'Paid To', 'Amount']],
+        body: allExpenses.map(e => {
+          const catLabel = isSalary(e.category) ? (e.category + ' - ' + (e.salaryMonth ? new Date(e.salaryMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : getMonthFromDate(e.date))) : (e.category || '-');
+          return [e.date || '-', catLabel, e.description || '-', e.paidTo || '-', money(e.amount || 0)];
+        }),
+        foot: [['Total Expenses', '', '', '', money(totalExp)]],
+        theme: 'grid',
+        headStyles: { fillColor: expRed, textColor: 255, fontStyle: 'bold', fontSize: 8 },
+        bodyStyles: { textColor: sText, fontSize: 7 },
+        alternateRowStyles: { fillColor: [255, 247, 237] },
+        footStyles: { fillColor: [255, 247, 237], textColor: expRed, fontStyle: 'bold', fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 18, halign: 'center' },
+          1: { cellWidth: 30, halign: 'left' },
+          2: { cellWidth: 62, halign: 'left' },
+          3: { cellWidth: 50, halign: 'left' },
+          4: { cellWidth: 38, halign: 'right' },
+        },
       });
-
-      needPage(7);
-      doc.setDrawColor(...expRed); doc.setLineWidth(0.08);
-      doc.line(ML, y, MR, y);
-      y += 1;
-      doc.setFillColor(255, 247, 237); doc.rect(ML, y, CW, 6, 'F');
-      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
-      doc.text('Total Expenses', ML + 2, y + 4);
-      doc.setFontSize(9); doc.setTextColor(...expRed);
-      doc.text(money(totalExp), MR - 2, y + 4, { align: 'right' });
-      y += 8;
+      y = (doc as any).lastAutoTable.finalY + 8;
     }
 
     // ── Section 3: Income vs Expenses ──
@@ -3967,11 +4233,12 @@ const App: React.FC = () => {
 
         {activeTab === 'fees' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Fees</p><p className="text-2xl font-bold text-cyan-400">₹{fees.reduce((s, f) => s + f.amount, 0).toLocaleString()}</p></div>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Fees</p><p className="text-2xl font-bold text-cyan-400">₹{students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + (st.feeAmount || 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Collected</p><p className="text-2xl font-bold text-emerald-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'paid').reduce((s, f) => s + f.amount, 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-2xl font-bold text-yellow-400">₹{students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + getStudentPaymentInfo(st).balance, 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-2xl font-bold text-red-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'overdue').reduce((s, f) => s + f.amount, 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Unpaid Students</p><p className="text-2xl font-bold text-rose-400">{students.filter(st => st.status === 'ACTIVE' && getStudentPaymentInfo(st).balance > 0).length}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-2xl font-bold text-yellow-400">₹{Math.max(students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + (st.feeAmount || 0), 0) - fees.filter(f => getEffectiveFeeStatus(f) === 'paid').reduce((s, f) => s + f.amount, 0), 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-2xl font-bold text-red-400">₹{students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + getStudentPaymentInfo(st).totalOverdue, 0).toLocaleString()}</p></div>
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search student or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
@@ -4001,7 +4268,7 @@ const App: React.FC = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Target</p><p className="text-xl font-bold text-cyan-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Collected</p><p className="text-xl font-bold text-emerald-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-xl font-bold text-yellow-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + getStudentPaymentInfo(s).balance, 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-xl font-bold text-yellow-400">₹{Math.max(students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0) - fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-xl font-bold text-red-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + getStudentPaymentInfo(s).totalOverdue, 0).toLocaleString()}</p></div>
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
@@ -4048,22 +4315,28 @@ const App: React.FC = () => {
               <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}{!isReadOnly && <button onClick={() => setShowHiddenEmployees(v => !v)} className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border transition ${showHiddenEmployees ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 hover:border-cyan-500'}`}><FiEye size={16} />{showHiddenEmployees ? 'Hide Hidden' : `Show Hidden (${employees.filter(e => e.hidden).length})`}</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr   className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(visibleEmployeesForPage, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
-              <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Other Deduction</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
+              <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Net Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Deduction</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
               <tbody>{employees.filter(e => (showHiddenEmployees || !e.hidden) && (e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.role.toLowerCase().includes(searchTerm.toLowerCase()))).slice(0, showAllEmployees ? undefined : 5).map(e => {
                 const ei = getEmployeeExpenseInfo(e);
                 return (<tr key={e.id} className={`border-t border-gray-800 hover:bg-gray-800/30 transition ${e.hidden ? 'opacity-50' : ''}`}>
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4 font-semibold">{e.name}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{e.role}</span></td><td className="px-6 py-4 hidden xl:table-cell text-gray-400">{e.department || '—'}</td>
-                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{(e.salary || 0).toLocaleString()}</td>
+                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{Math.max(0, (e.salary || 0) - getLatestEmployeeDeduction(e).amount).toLocaleString()}{getLatestEmployeeDeduction(e).amount > 0 && <p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()}</p>}</td>
                   <td className="px-6 py-4">
                     <div className="relative flex items-center gap-2">
                       <button onClick={() => { if (deductPopoverEmpId === e.id) { setDeductPopoverEmpId(''); return; } openDeductPopover(e); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition" title="Add/Edit monthly deduction"> <FiMinus size={13} /> Deduct</button>
-                      {(e.otherDeduction || 0) > 0 && <span className="text-xs text-red-400 whitespace-nowrap">₹{(e.otherDeduction || 0).toLocaleString()}/mo</span>}
+                      {(() => {
+                        const latest = getLatestEmployeeDeduction(e);
+                        if (latest.amount <= 0) return null;
+                        const label = latest.month
+                          ? ` (${new Date(latest.month + '-01T00:00:00').toLocaleDateString('en-US', { month: 'short' })})`
+                          : '/mo';
+                        return <span className="text-xs text-red-400 whitespace-nowrap" title={latest.month ? `Latest deduction for ${latest.month}` : 'Monthly deduction'}>₹{latest.amount.toLocaleString()}{label}</span>;
+                      })()}
                       {deductPopoverEmpId === e.id && (
                         <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[240px] space-y-2">
-                          <label className="text-xs text-cyan-400">Month</label>
-                          <select value={deductMonth} onChange={ev => { setDeductMonth(ev.target.value); const cur = e.monthDeduction?.[ev.target.value]; setDeductAmount(cur != null ? String(cur) : String(e.otherDeduction || '')); }} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm">{[...Array(12)].map((_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mn = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); return <option key={v} value={v}>{mn}</option>; })}</select>
-                          <label className="text-xs text-cyan-400">Amount (₹)</label>
+                          <label className="text-xs text-cyan-400">Deduction Amount (₹)</label>
                           <input type="number" min={0} placeholder="Deduction amount" value={deductAmount} onChange={ev => setDeductAmount(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm" />
+                          <p className="text-[11px] text-gray-500">Applies to {new Date(deductMonth + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
                           <div className="flex gap-2 pt-1">
                             <button onClick={() => handleSaveMonthDeduction(e)} className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-semibold">Save</button>
                             <button onClick={() => setDeductPopoverEmpId('')} className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs">Cancel</button>
@@ -4184,7 +4457,7 @@ const App: React.FC = () => {
               <tbody>{expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllExpenses ? undefined : 5).map(e => (
                 <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{e.category}</span></td><td className="px-6 py-4 font-semibold">₹{e.amount.toLocaleString()}</td>
-                  <td className="px-6 py-4">{e.paidTo}{e.employeeId && <span className="ml-2 text-xs text-cyan-400">🔗 Linked</span>}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.date}</td>
+                  <td className="px-6 py-4">{e.paidTo}{e.employeeId && <span className="ml-2 text-xs text-cyan-400">🔗 Linked</span>}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.salaryMonth ? <span>{e.salaryMonth}{e.date && <span className="ml-1 text-xs text-gray-600">({e.date})</span>}</span> : e.date}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${e.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{e.status}</span></td>
                   <td className="px-6 py-4">{e.billUrl && <button onClick={() => previewBill(e.billUrl!)} className="text-cyan-400 hover:text-cyan-300"><FiImage size={18} /></button>}</td>
                   <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'expense')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(e.id!, 'expense')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
@@ -4417,91 +4690,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Row 1b: Month-wise Financial Summary Table */}
-            {(() => {
-              const sy = summaryYear;
-              const allFeesPaid = reportFees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid');
-              const allExpensesForYear = reportExpenses;
-              const sySalaryExpenses = allExpensesForYear.filter((e: Expense) => e.category === 'Salaries');
-              const syOtherExpenses = allExpensesForYear.filter((e: Expense) => e.category !== 'Salaries');
-              const syTotalFees = allFeesPaid.reduce((s: number, f: Fee) => s + f.amount, 0);
-              const syTotalSalary = sySalaryExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
-              const syTotalOther = syOtherExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
-              const syTotalExpenses = syTotalSalary + syTotalOther;
-              const syNet = syTotalFees - syTotalExpenses;
-
-              const parseYear = (d: string) => d ? parseInt(d.substring(0, 4), 10) : 0;
-              const parseMonth = (d: string) => d && d.length >= 7 ? parseInt(d.substring(5, 7), 10) - 1 : -1;
-              const availableYears = [...new Set([
-                ...fees.map((f: Fee) => parseYear(f.paidDate || f.dueDate)),
-                ...expenses.map((e: Expense) => parseYear(e.date))
-              ])].filter(y => y > 0).sort((a: number, b: number) => b - a);
-              if (availableYears.length === 0) availableYears.push(new Date().getFullYear());
-
-              return (
-            <div className="bg-[#1E1E1E] p-6 rounded-2xl border border-gray-800">
-              <div className="flex flex-col md:flex-row justify-between md:items-center gap-3 mb-6">
-                <h3 className="text-lg font-bold flex items-center gap-2"><FiBarChart2 className="text-cyan-400" />Month-wise Financial Summary</h3>
-                <div className="flex items-center gap-3">
-
-                  <select
-                    value={summaryYear}
-                    onChange={e => setSummaryYear(Number(e.target.value))}
-                    className="p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm font-semibold"
-                  >
-                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-700">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-cyan-400">Month</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-emerald-400">Collection (Fees)</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-orange-400">Salary Expense</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-purple-400">Other Expenses</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-red-400">Total Expenses</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-cyan-400">Net (In - Out)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthsArr.map((m, i) => {
-                      const mFees = allFeesPaid.filter((f: Fee) => parseMonth(f.paidDate || f.dueDate) === i).reduce((s: number, f: Fee) => s + f.amount, 0);
-                      const mSalary = sySalaryExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
-                      const mOther = syOtherExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
-                      const mTotal = mSalary + mOther;
-                      const mNet = mFees - mTotal;
-                      const hasData = mFees > 0 || mTotal > 0;
-                      if (!hasData) return null;
-                      return (
-                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/20 transition">
-                          <td className="px-4 py-3"><span className="font-semibold text-white">{m}</span><span className="text-gray-500 text-xs ml-1">{sy}</span></td>
-                          <td className="px-4 py-3 text-right"><span className="text-emerald-400 font-semibold">₹{mFees.toLocaleString()}</span></td>
-                          <td className="px-4 py-3 text-right"><span className="text-orange-400 font-semibold">₹{mSalary.toLocaleString()}</span></td>
-                          <td className="px-4 py-3 text-right"><span className="text-purple-400 font-semibold">₹{mOther.toLocaleString()}</span></td>
-                          <td className="px-4 py-3 text-right"><span className="text-red-400 font-semibold">₹{mTotal.toLocaleString()}</span></td>
-                          <td className="px-4 py-3 text-right"><span className={`font-bold ${mNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>₹{mNet.toLocaleString()}</span></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-cyan-500/30 bg-gray-800/30">
-                      <td className="px-4 py-3"><span className="font-bold text-cyan-400">TOTAL</span></td>
-                      <td className="px-4 py-3 text-right"><span className="font-bold text-emerald-400">₹{syTotalFees.toLocaleString()}</span></td>
-                      <td className="px-4 py-3 text-right"><span className="font-bold text-orange-400">₹{syTotalSalary.toLocaleString()}</span></td>
-                      <td className="px-4 py-3 text-right"><span className="font-bold text-purple-400">₹{syTotalOther.toLocaleString()}</span></td>
-                      <td className="px-4 py-3 text-right"><span className="font-bold text-red-400">₹{syTotalExpenses.toLocaleString()}</span></td>
-                      <td className="px-4 py-3 text-right"><span className={`font-bold ${syNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>₹{syNet.toLocaleString()}</span></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-              );
-            })()}
-
             {/* Row 2: Revenue vs Expenses (Area Chart) */}
             <div className="bg-[#1E1E1E] p-6 rounded-2xl border border-gray-800">
               <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><FiBarChart2 className="text-cyan-400" />Revenue vs Expenses - {cy}</h3>
@@ -4602,6 +4790,12 @@ const App: React.FC = () => {
 
             {/* Export Buttons */}
             <div className="flex flex-wrap gap-3 pt-2 items-center">
+              <div className="flex items-center gap-2">
+                <select value={summaryYear} onChange={e => setSummaryYear(Number(e.target.value))} className="p-3 bg-gray-800 rounded-xl border border-gray-700 text-white text-sm font-semibold">
+                  {[...new Set([...fees.map((f: Fee) => (f.paidDate || f.dueDate || '').substring(0, 4)), ...expenses.map((e: Expense) => (e.date || '').substring(0, 4))])].filter(Boolean).sort((a, b) => b.localeCompare(a)).map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <button onClick={() => exportFinancialStatementPDF()} className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Statement (PDF)</button>
+              </div>
               <button onClick={() => exportToExcel(students, 'Students')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Students Excel</button>
               <button onClick={() => exportStudentPDF(students)} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />Students PDF</button>
               <button onClick={() => exportToExcel(fees, 'Fees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Fees Excel</button>
@@ -4610,7 +4804,7 @@ const App: React.FC = () => {
               <button onClick={() => exportFinancialReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Financial Report (PDF)</button>
               <button onClick={() => exportEmployeeListPDF()} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Employee List (PDF)</button>
               <button onClick={() => exportFeesCollectionReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Fees Collection (PDF)</button>
-              <button onClick={() => exportMonthlyFinancialSummaryPDF()} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Monthly Financial Summary (PDF)</button>
+              <button onClick={() => exportUnpaidStudentsPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg"><FiFileText size={16} />Unpaid Students (PDF)</button>
             </div>
           </div>
         )}

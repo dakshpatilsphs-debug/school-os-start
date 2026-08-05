@@ -799,7 +799,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       e.employeeId === emp.autoId &&
       e.category === 'Salaries' &&
       e.status === 'paid' &&
-      e.date.startsWith(month)
+      ((e.salaryMonth || '') === month || (e.date || '').startsWith(month))
     );
   };
 
@@ -987,7 +987,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const clLeft = remainingAnnual;
                         const paid = isEmployeePaidForMonth(e, selectedDate.substring(0, 7));
                         return (
-                          <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/10 hover:bg-red-500/15' : 'hover:bg-gray-800/30'}`}>
+                          <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>
                             <td className="px-4 py-3"><span className="text-emerald-400 font-semibold">{info.presentDays}</span>{info.lateDays > 0 && <span className="text-yellow-400 text-xs ml-1">+{info.lateDays}L</span>}{info.clCovered > 0 && <span className="text-cyan-400 text-xs ml-1">+{info.clCovered}CL</span>}</td>
                             <td className="px-4 py-3"><span className="text-red-400 font-semibold">{effAbsent}</span></td>
