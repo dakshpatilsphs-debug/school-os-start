@@ -11,6 +11,12 @@ export interface Student {
   discountAmount?: number;
   sortOrder?: number;
   secondaryAutoId?: string;
+
+  inactiveDate?: string;
+  deactivationReason?: string;
+  refundAmount?: number;
+  refundDescription?: string;
+  refundDate?: string;
 }
 
 export interface Fee {

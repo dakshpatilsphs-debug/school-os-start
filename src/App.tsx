@@ -33,7 +33,7 @@ import { ScheduleSection } from './Schedule';
 import type { SalarySlipData } from './salarySlipTypes';
 import AIAssistant from './components/AIAssistant';
 
-type Tab = 'dashboard' | 'students' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai';
+type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai';
 
 import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered } from './clUtils';
 
@@ -138,6 +138,16 @@ const App: React.FC = () => {
   const [showAllExpenses, setShowAllExpenses] = useState(false);
   const [showAllEmployees, setShowAllEmployees] = useState(false);
   const [showHiddenEmployees, setShowHiddenEmployees] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ students: true });
+  const [deactSearch, setDeactSearch] = useState('');
+  const [deactClassFilter, setDeactClassFilter] = useState('');
+  const [deactTarget, setDeactTarget] = useState<Student | null>(null);
+  const [deactStep, setDeactStep] = useState<'confirm' | 'refund'>('confirm');
+  const [deactReason, setDeactReason] = useState('');
+  const [deactDate, setDeactDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundDesc, setRefundDesc] = useState('');
+  const [showAllDeactivated, setShowAllDeactivated] = useState(false);
   const [deductPopoverEmpId, setDeductPopoverEmpId] = useState('');
   const [deductMonth, setDeductMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const [deductAmount, setDeductAmount] = useState('');
@@ -238,9 +248,10 @@ const App: React.FC = () => {
     doc.addPage();
     pdfHeader(doc, 'Student Register', schoolSettings.pdfStudentSubtitle || 'All registered students with details', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
     if (students.length > 0) {
+      const registerStudents = students.filter(s => !isDeactivatedStudent(s));
       autoTable(doc, {
         head: [['ID', 'Name', 'Roll', 'Class', 'Parent', 'Phone', 'Fee', 'Status']],
-        body: students.map(s => [s.autoId, s.name, s.rollNumber, s.class, s.parentName, s.parentPhone, pdfMoney(s.feeAmount || 0), s.status]),
+        body: registerStudents.map(s => [s.autoId, s.name, s.rollNumber, s.class, s.parentName, s.parentPhone, pdfMoney(s.feeAmount || 0), s.status]),
         startY: 36, theme: 'striped',
         headStyles: { fillColor: c.primary, textColor: c.white, fontSize: bodySize, fontStyle: 'bold', cellPadding: 3 },
         bodyStyles: { fontSize: bodySize - 1, textColor: c.dark, cellPadding: 2.5 },
@@ -268,12 +279,13 @@ const App: React.FC = () => {
 
 
     // ===== 2b. STUDENT DOCUMENT CHECKLIST DETAILS =====
-    if (students.length > 0 && documentOptions.length > 0) {
+    const checklistStudents = students.filter(s => !isDeactivatedStudent(s));
+    if (checklistStudents.length > 0 && documentOptions.length > 0) {
       doc.addPage();
       pdfHeader(doc, 'Student Document Checklist', schoolSettings.pdfStudentSubtitle || 'Submitted and missing documents by student', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
       
       const checklistHead = [['Student ID', 'Student Name', 'Class', ...documentOptions]];
-      const checklistBody = students.map(s => {
+      const checklistBody = checklistStudents.map(s => {
         const row = [s.autoId, s.name, s.class || '—'];
         documentOptions.forEach(docOpt => {
           const isSubmitted = (s.submittedDocuments || []).includes(docOpt);
@@ -683,6 +695,7 @@ const App: React.FC = () => {
       feeCount: sf.length,
     };
   };
+  const isDeactivatedStudent = (s: Student) => (s.autoId || '').startsWith('D-');
   const getEmployeeExpenseInfo = (employee: Employee) => {
     const ee = expenses.filter(e => e.employeeId === employee.autoId);
     return { totalPaid: ee.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0), totalPending: ee.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0), expenseCount: ee.length };
@@ -775,11 +788,11 @@ const App: React.FC = () => {
     setForceFeeForm(false);
   }, [resetModalSubViews]);
 
-  const handleSaveStudent = async () => {
+  const handleSaveStudent = async (forceAdd = false) => {
     try {
       const final: Student = { ...studentForm };
 
-      if (modalType === 'edit' && currentRecord?.id) {
+      if (!forceAdd && modalType === 'edit' && currentRecord?.id) {
         // Auto ID is locked during edit to prevent mismatched references.
         final.autoId = currentRecord.autoId;
         final.secondaryAutoId = generateSecondaryStudentId(final.name, final.class, final.rollNumber) || currentRecord.secondaryAutoId;
@@ -894,6 +907,105 @@ const App: React.FC = () => {
   };
   const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); showNotification(`Selected: ${e.name}`, 'success'); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
   const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); }     closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
+
+  // ===== Student Deactivation & Refund =====
+  const closeDeactModal = () => { setDeactTarget(null); setDeactStep('confirm'); setDeactReason(''); setRefundAmount(''); setRefundDesc(''); };
+
+  const openDeactivateStudent = (s: Student) => {
+    if (isDeactivatedStudent(s)) return;
+    const info = getStudentPaymentInfo(s);
+    setDeactTarget(s);
+    setDeactStep('confirm');
+    setDeactReason('');
+    setRefundAmount(info.totalPaid > 0 ? String(info.totalPaid) : '');
+    setRefundDesc('');
+  };
+
+  const runDeactivateStudent = async () => {
+    if (!deactTarget || isDeactivatedStudent(deactTarget)) return;
+    const paidBefore = getStudentPaymentInfo(deactTarget).totalPaid;
+    const newAutoId = 'D-' + deactTarget.autoId;
+    try {
+      await updateStudentAutoIdReferences(deactTarget.autoId, newAutoId);
+      const updateData = {
+        autoId: newAutoId,
+        status: 'INACTIVE',
+        inactiveDate: deactDate || new Date().toISOString().split('T')[0],
+        deactivationReason: deactReason,
+      };
+      await updateStudent(deactTarget.id!, updateData);
+      const updated: Student = { ...deactTarget, ...updateData, refundAmount: 0, refundDescription: '', refundDate: '' };
+      setStudents(prev => prev.map(x => (x.id === deactTarget.id ? updated : x)));
+      await loadData();
+      setDeactTarget(updated);
+      if (paidBefore > 0) {
+        setRefundAmount(String(paidBefore));
+        setRefundDesc('');
+        setDeactStep('refund');
+        showNotification('Student deactivated. Refund is available.', 'success');
+      } else {
+        closeDeactModal();
+        showNotification(`Student deactivated → ${newAutoId}`, 'success');
+      }
+    } catch (error) {
+      showFirebaseError(error, 'Failed to deactivate student');
+    }
+  };
+
+  const runStudentRefund = async () => {
+    if (!deactTarget || !isDeactivatedStudent(deactTarget)) return;
+    const amount = parseFloat(refundAmount);
+    if (isNaN(amount) || amount < 0) { showNotification('Enter a valid refund amount', 'error'); return; }
+    try {
+      if (amount > 0) {
+        const seq = await getNextSequentialId('expenses');
+        await addExpense({
+          autoId: 'EXP-' + String(seq).padStart(3, '0'),
+          category: 'Student Return',
+          amount,
+          description: `Fee refund to ${deactTarget.name} (${deactTarget.autoId}) - ${refundDesc || 'Deactivation refund'}`,
+          date: deactDate || new Date().toISOString().split('T')[0],
+          paidTo: deactTarget.name,
+          status: 'paid',
+          studentId: deactTarget.autoId,
+        });
+      }
+      await updateStudent(deactTarget.id!, { refundAmount: amount, refundDescription: refundDesc, refundDate: deactDate || new Date().toISOString().split('T')[0] });
+      const withRefund: Student = { ...deactTarget, refundAmount: amount, refundDescription: refundDesc, refundDate: deactDate || new Date().toISOString().split('T')[0] };
+      setStudents(prev => prev.map(x => (x.id === deactTarget.id ? withRefund : x)));
+      await loadData();
+      exportStudentReturnPDF(withRefund);
+      closeDeactModal();
+      showNotification('Refund recorded and Student Return PDF generated', 'success');
+    } catch (error) {
+      showFirebaseError(error, 'Failed to save refund');
+    }
+  };
+
+  const handleReactivateStudent = async (s: Student) => {
+    if (!isDeactivatedStudent(s)) return;
+    const newAutoId = s.autoId.startsWith('D-') ? s.autoId.slice(2) : s.autoId;
+    if (!confirm(`Reactivate ${s.name} (${s.autoId})? Its Auto ID will change back to ${newAutoId}, any "Student Return" refund expense will be deleted, and the fee add option will be restored.`)) return;
+    try {
+      const refundExpenses = expenses.filter(e => e.category === 'Student Return' && e.studentId === s.autoId);
+      for (const e of refundExpenses) await deleteExpense(e.id!);
+      await updateStudentAutoIdReferences(s.autoId, newAutoId);
+      await updateStudent(s.id!, {
+        autoId: newAutoId,
+        status: 'ACTIVE',
+        inactiveDate: '',
+        deactivationReason: '',
+        refundAmount: 0,
+        refundDescription: '',
+        refundDate: '',
+      });
+      await loadData();
+      showNotification(`Student reactivated → ${newAutoId}${refundExpenses.length ? ' · refund expense deleted' : ''}`, 'success');
+    } catch (error) {
+      showFirebaseError(error, 'Failed to reactivate student');
+    }
+  };
+
   const handleDirectSalaryPay = async (expense: any) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
     try {
@@ -2899,8 +3011,8 @@ const App: React.FC = () => {
   };
 
   const exportFeesByStudentPDF = () => {
-    const filtered = students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter));
-    if (filtered.length === 0) { showNotification('No active students found', 'error'); return; }
+    const filtered = students.filter(s => (!studentClassFilter || s.class === studentClassFilter));
+    if (filtered.length === 0) { showNotification('No students found', 'error'); return; }
     const doc = new jsPDF();
     const pw = 210;
     const c = getPDFColorsFromSettings(schoolSettings);
@@ -3241,7 +3353,7 @@ const App: React.FC = () => {
     setCurrentRecord(null);
     setBillFile(null);
 
-    if (activeTab === 'students') {
+    if (activeTab === 'studentadd' || activeTab === 'studentlist') {
       try {
         const latestStudents = (await getStudents()) as Student[];
         setStudentForm(prev => ({
@@ -3555,6 +3667,7 @@ const App: React.FC = () => {
 
   // ===== Professional Student PDF Report (A4 Portrait) =====
   const exportStudentPDF = (studentList: Student[]) => {
+    const list = studentList.filter(s => !isDeactivatedStudent(s));
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pw = 210;
     const c = getPDFColorsFromSettings(schoolSettings);
@@ -3571,8 +3684,8 @@ const App: React.FC = () => {
       schoolSettings
     );
 
-    const activeCount = studentList.filter(s => s.status === 'ACTIVE').length;
-    const totalFees = studentList.reduce((sum, s) => sum + (s.feeAmount || 0), 0);
+    const activeCount = list.filter(s => s.status === 'ACTIVE').length;
+    const totalFees = list.reduce((sum, s) => sum + (s.feeAmount || 0), 0);
     const cardY = 34;
     const cardH = 16;
     const gap = 4;
@@ -3580,9 +3693,9 @@ const App: React.FC = () => {
     const cardW = (pw - 20 - 3 * gap) / 4; // Dynamically calculated width: (210 - 20 - 12)/4 = 44.5mm
 
     const cards: { label: string; value: string; color: [number, number, number] }[] = [
-      { label: 'TOTAL', value: String(studentList.length), color: c.primary },
+      { label: 'TOTAL', value: String(list.length), color: c.primary },
       { label: 'ACTIVE', value: String(activeCount), color: [16, 185, 129] },
-      { label: 'INACTIVE', value: String(studentList.length - activeCount), color: [239, 68, 68] },
+      { label: 'INACTIVE', value: String(list.length - activeCount), color: [239, 68, 68] },
       { label: 'FEE TARGET', value: pdfMoney(totalFees), color: [245, 158, 11] },
     ];
 
@@ -3601,7 +3714,7 @@ const App: React.FC = () => {
       doc.text(card.value, x + 3.5, cardY + 12);
     });
 
-    const tableData = studentList.map((s, i) => {
+    const tableData = list.map((s, i) => {
       const docStatus = getStudentDocumentStatus(s);
       return [
         String(i + 1),
@@ -3643,12 +3756,12 @@ const App: React.FC = () => {
       },
     });
 
-    if (studentList.length > 0 && documentOptions.length > 0) {
+    if (list.length > 0 && documentOptions.length > 0) {
       doc.addPage();
       pdfHeader(doc, 'Student Document Checklist', schoolSettings.pdfStudentSubtitle || 'Submitted and missing documents by student', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
       
       const checklistHead = [['Student ID', 'Student Name', 'Class', ...documentOptions]];
-      const checklistBody = studentList.map(s => {
+      const checklistBody = list.map(s => {
         const row = [s.autoId, s.name, s.class || '—'];
         documentOptions.forEach(docOpt => {
           const isSubmitted = (s.submittedDocuments || []).includes(docOpt);
@@ -3709,6 +3822,56 @@ const App: React.FC = () => {
     doc.save(`Student_Register_${new Date().toISOString().split('T')[0]}.pdf`);
     showNotification('Student PDF exported successfully', 'success');
   };
+
+  const exportStudentReturnPDF = (student: Student) => {
+    const doc = new jsPDF();
+    const pw = 210;
+    const c = getPDFColorsFromSettings(schoolSettings);
+    const studentFees = fees.filter(f =>
+      f.studentId === student.autoId ||
+      (student.autoId.startsWith('D-') && f.studentId === student.autoId.slice(2)) ||
+      (student.secondaryAutoId && f.secondaryAutoId === student.secondaryAutoId)
+    );
+    const totalPaid = studentFees.filter(f => getEffectiveFeeStatus(f) === 'paid').reduce((s, f) => s + (f.amount || 0), 0);
+
+    pdfHeader(doc, 'Student Return Voucher', 'Deactivation & fee refund statement', c, pw, schoolSettings.schoolLogo, schoolSettings.schoolName, schoolSettings);
+
+    if (schoolSettings.address) {
+      doc.setFontSize(8);
+      doc.setTextColor(...c.muted);
+      doc.text(schoolSettings.address, pw / 2, 31, { align: 'center' });
+      doc.text([schoolSettings.phone, schoolSettings.email].filter(Boolean).join(' | '), pw / 2, 35.5, { align: 'center' });
+    }
+
+    autoTable(doc, {
+      startY: schoolSettings.address ? 40 : 34,
+      margin: { left: 15, right: 15, bottom: 20 },
+      head: [['Field', 'Details']],
+      body: [
+        ['Student Name', student.name],
+        ['Auto ID', student.autoId],
+        ['Class', student.class || '-'],
+        ['Roll Number', student.rollNumber || '-'],
+        ['Parent / Guardian', student.parentName || '-'],
+        ['Contact Number', student.parentPhone || '-'],
+        ['Package / Fee (Rs)', pdfMoney(student.feeAmount || 0)],
+        ['Total Paid (Rs)', pdfMoney(totalPaid)],
+        ['Refund Amount (Rs)', pdfMoney(student.refundAmount || 0)],
+        ['Deactivation Date', student.inactiveDate || '-'],
+        ['Refund Date', student.refundDate || '-'],
+        ['Deactivation Description', student.deactivationReason || student.refundDescription || '-'],
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [...c.primary], textColor: c.white, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { fontSize: 9, textColor: c.dark, cellPadding: 2.5 },
+      columnStyles: { 0: { cellWidth: 55, fontStyle: 'bold', fillColor: c.light }, 1: { cellWidth: 125, halign: 'left' } },
+    });
+
+    pdfFooter(doc, schoolSettings.schoolName, pw, schoolSettings);
+    doc.save(`Student_Return_${(student.autoId || student.name || 'student').replace(/[^\w\-]+/g, '_')}.pdf`);
+    showNotification('Student Return PDF generated', 'success');
+  };
+
 
   // ===== Safe helpers for import (prevent NaN/undefined Firestore errors) =====
   const safeStr = (row: any, ...keys: string[]): string => {
@@ -3953,6 +4116,29 @@ const App: React.FC = () => {
     reader.readAsArrayBuffer(file);
   };
 
+  const downloadSampleExcel = () => {
+    const isFees = activeTab === 'fees';
+    const aoa: any[][] = isFees
+      ? [
+          ['Auto ID', 'Student Auto ID', 'Student Name', 'Amount', 'Fee Type', 'Due Date', 'Paid Date', 'Status', 'Description'],
+          ['FEE-001', 'STU-001', 'John Doe', 16000, 'Tuition Fee', '2026-01-10', '2026-01-05', 'paid', 'Term 1 fees'],
+          ['FEE-002', 'STU-002', 'Jane Smith', 20000, 'Admission Fee', '2026-01-10', '', 'pending', ''],
+          ['FEE-003', 'STU-003', 'Ali Khan', 12000, 'Tuition Fee', '2026-01-10', '', 'overdue', 'Term 1 fees'],
+        ]
+      : [
+          ['Auto ID', 'Name', 'Class', 'Roll Number', 'Package', 'Fee Amount', 'Parent Name', 'Parent Phone', 'Email', 'Address', 'Date of Birth', 'Gender', 'Admission Date', 'Status'],
+          ['STU-001', 'John Doe', 'CLASS 1', '001', 'Basic', 16000, 'John Doe Sr', '9876543210', 'john@example.com', 'Main Road, City', '2018-01-01', 'MALE', '2026-04-01', 'ACTIVE'],
+          ['STU-002', 'Jane Smith', 'CLASS 1', '002', 'Standard', 20000, 'Jane Smith Sr', '9876543211', '', '', '2017-06-15', 'FEMALE', '2026-04-01', 'ACTIVE'],
+          ['', 'Ali Khan', 'CLASS 2', '', 'Basic', 12000, 'Ali Khan Sr', '9876543212', '', '', '2019-03-20', 'MALE', '2026-04-01', 'ACTIVE'],
+        ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = (aoa[0] || []).map((_, i) => ({ wch: Math.max(...aoa.map(r => String(r[i] ?? '').length), 12) + 2 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isFees ? 'Fees' : 'Students');
+    XLSX.writeFile(wb, `Sample_${isFees ? 'Fees' : 'Students'}_Import.xlsx`);
+    showNotification('Sample file downloaded', 'success');
+  };
+
   type ExpenseCategory = { name: string; value: number };
 
   const formatCurrencyTooltip = (value: any): [string, string] => [`₹${Number(value || 0).toLocaleString()}`, 'Amount'];
@@ -4002,12 +4188,31 @@ const App: React.FC = () => {
     { name: 'Lost', value: equipments.filter(eq => eq.condition === 'Lost').length },
   ].filter(item => item.value > 0);
 
-  const navItems = [{ id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' }, { id: 'students', icon: FiUsers, label: 'Students' }, { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' }, { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' }, { id: 'attendance', icon: FiCheck, label: 'Attendance' }, { id: 'employees', icon: FiBriefcase, label: 'Employees' }, { id: 'equipments', icon: FiGrid, label: 'Equipments' }, { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' }, { id: 'schedule', icon: FiCalendar, label: 'Schedule' }, { id: 'reports', icon: FiPieChart, label: 'Reports' }, { id: 'studentedit', icon: FiEdit2, label: 'Student Edit' }, { id: 'correction', icon: FiEdit2, label: 'Correction' }, { id: 'ai', icon: FiCpu, label: 'AI Assistant' }];
-  const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : activeTab === 'students' ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : 'Employee Management';
+  const navItems = [
+    { id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' },
+    { id: 'students', icon: FiUsers, label: 'Students', children: [
+      { id: 'studentadd', icon: FiPlus, label: 'Student Add' },
+      { id: 'studentlist', icon: FiUsers, label: 'Student List' },
+      { id: 'deactivatestudent', icon: FiAlertTriangle, label: 'Deactivate Student' },
+      { id: 'studentedit', icon: FiEdit2, label: 'Student Documents' },
+    ] },
+    { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' },
+    { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' },
+    { id: 'attendance', icon: FiCheck, label: 'Attendance' },
+    { id: 'employees', icon: FiBriefcase, label: 'Employees' },
+    { id: 'equipments', icon: FiGrid, label: 'Equipments' },
+    { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' },
+    { id: 'schedule', icon: FiCalendar, label: 'Schedule' },
+    { id: 'reports', icon: FiPieChart, label: 'Reports' },
+    { id: 'correction', icon: FiEdit2, label: 'Correction' },
+    { id: 'ai', icon: FiCpu, label: 'AI Assistant' },
+  ];
+  const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : ['studentadd', 'studentlist', 'deactivatestudent'].includes(activeTab) ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : 'Employee Management';
 
   const searchBtn = "flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 px-5 py-3 rounded-xl transition-all";
 
   const filteredStudentsForStudentTab = students.filter(s => {
+    if (isDeactivatedStudent(s)) return false;
     const q = searchTerm.toLowerCase();
     const matchesClass = !studentClassFilter || s.class === studentClassFilter;
     const matchesSearch =
@@ -4119,13 +4324,38 @@ const App: React.FC = () => {
           <div className="p-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl shadow-lg shadow-cyan-500/30"><SchoolLogo /></div><span>School OS</span>
         </div>
         <nav className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
-          {navItems.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id as Tab)} className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 group ${activeTab === item.id ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
-              <item.icon className={`${activeTab === item.id ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={20} />
-              <span className={`${activeTab === item.id ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{item.label}</span>
-              {activeTab === item.id && <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50" />}
-            </button>
-          ))}
+          {navItems.map(item => {
+            if (item.children) {
+              const folderActive = (item.children as any[]).some(c => activeTab === c.id);
+              return (
+                <div key={item.id}>
+                  <button onClick={() => setExpandedFolders(prev => ({ ...prev, [item.id]: !prev[item.id] }))} className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 group ${folderActive ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
+                    <item.icon className={`${folderActive ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={20} />
+                    <span className={`${folderActive ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{item.label}</span>
+                    {expandedFolders[item.id] ? <FiChevronUp className="ml-auto text-gray-500 transition-transform" size={16} /> : <FiChevronDown className="ml-auto text-gray-500 transition-transform" size={16} />}
+                  </button>
+                  {expandedFolders[item.id] && (
+                    <div className="mt-1 space-y-1 pl-4">
+                      {(item.children as any[]).map(child => (
+                        <button key={child.id} onClick={() => setActiveTab(child.id as Tab)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${activeTab === child.id ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
+                          <child.icon className={`${activeTab === child.id ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={16} />
+                          <span className={`text-sm ${activeTab === child.id ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{child.label}</span>
+                          {activeTab === child.id && <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <button key={item.id} onClick={() => setActiveTab(item.id as Tab)} className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 group ${activeTab === item.id ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
+                <item.icon className={`${activeTab === item.id ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={20} />
+                <span className={`${activeTab === item.id ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{item.label}</span>
+                {activeTab === item.id && <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50" />}
+              </button>
+            );
+          })}
         </nav>
         <div className="pt-6 border-t border-gray-800 mt-4 shrink-0"><div className="flex items-center gap-3 px-4 py-3 bg-gray-800/50 rounded-xl"><div className="w-10 h-10 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full flex items-center justify-center font-bold">A</div><div><p className="text-sm font-semibold">Admin</p><p className="text-xs text-gray-400">Super User</p></div></div></div>
       </div>
@@ -4133,7 +4363,7 @@ const App: React.FC = () => {
       <div className="ml-72 p-8">
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -4147,7 +4377,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!['students', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'schedule', 'studentedit', 'ai'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
+        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'schedule', 'studentedit', 'ai'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
 
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
@@ -4197,7 +4427,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'students' && (
+        {activeTab === 'studentlist' && (
           <div className="space-y-6">
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, barcode..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
@@ -4210,13 +4440,14 @@ const App: React.FC = () => {
                 <button onClick={() => exportToExcel(filteredStudentsForStudentTab, 'Students')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button>
                 <button onClick={() => exportStudentPDF(filteredStudentsForStudentTab)} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>
                 {!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}
+                <button onClick={downloadSampleExcel} className={searchBtn + ' hover:border-purple-500/50'}><FiFileText size={18} />Sample</button>
               </div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
               <div className="overflow-x-auto"><table className="w-full min-w-max">
                 <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Roll</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Class</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Package</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Fee</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Parent</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
                 <tbody>
-                  {students.filter(s => (!studentClassFilter || s.class === studentClassFilter) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || s.class.toLowerCase().includes(searchTerm.toLowerCase()))).slice(0, showAllStudents ? undefined : 5).map(s => (
+                  {filteredStudentsForStudentTab.slice(0, showAllStudents ? undefined : 5).map(s => (
                     <tr key={s.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                       <td className="px-6 py-4 font-mono text-cyan-400">{s.autoId}</td><td className="px-6 py-4 font-semibold">{s.name}</td><td className="px-6 py-4">{s.rollNumber}</td><td className="px-6 py-4">{s.class}</td>
                       <td className="px-6 py-4 hidden md:table-cell"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{s.package}</span></td><td className="px-6 py-4 font-semibold text-yellow-400">₹{(s.feeAmount || 0).toLocaleString()}</td><td className="px-6 py-4 text-gray-400 hidden lg:table-cell">{s.parentName}</td>
@@ -4227,16 +4458,182 @@ const App: React.FC = () => {
                 </tbody>
               </table></div>
             </div>
-            {students.filter(s => (!studentClassFilter || s.class === studentClassFilter) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase()))).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllStudents ? 'Showing all' : `Showing 5 of ${students.filter(s => (!studentClassFilter || s.class === studentClassFilter) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase()))).length}`}</p><button onClick={() => setShowAllStudents(!showAllStudents)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllStudents ? 'Show Less' : `View All ${students.filter(s => (!studentClassFilter || s.class === studentClassFilter) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase()))).length}`}</button></div>}
+            {filteredStudentsForStudentTab.length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllStudents ? 'Showing all' : `Showing 5 of ${filteredStudentsForStudentTab.length}`}</p><button onClick={() => setShowAllStudents(!showAllStudents)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllStudents ? 'Show Less' : `View All ${filteredStudentsForStudentTab.length}`}</button></div>}
           </div>
         )}
 
+        {activeTab === 'studentadd' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap gap-2">
+              {!isReadOnly && <button onClick={() => { setModalType('add'); setCurrentRecord(null); setBillFile(null); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Open Add Student Form</button>}
+              <button onClick={() => { resetModalSubViews(); setShowClassMgmt(true); setShowModal(true); }} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-5 py-3 rounded-xl transition-all text-sm font-semibold"><FiTag size={18} />Manage Classes</button>
+              <button onClick={() => { resetModalSubViews(); setShowPackageMgmt(true); setShowModal(true); }} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-5 py-3 rounded-xl transition-all text-sm font-semibold"><FiDollarSign size={18} />Manage Packages</button>
+              <button onClick={() => { resetModalSubViews(); setShowDocumentMgmt(true); setShowModal(true); }} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-5 py-3 rounded-xl transition-all text-sm font-semibold"><FiFileText size={18} />Manage Documents</button>
+              {!isReadOnly && <label className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-yellow-500/50 px-5 py-3 rounded-xl transition-all text-sm font-semibold cursor-pointer"><FiUpload size={18} />Import Students<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}
+              <button onClick={downloadSampleExcel} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-purple-500/50 px-5 py-3 rounded-xl transition-all text-sm font-semibold"><FiFileText size={18} />Download Sample</button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-[#1E1E1E] rounded-2xl border border-gray-800 p-6">
+                <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><FiPlus className="text-cyan-400" />Add New Student</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Student Name *</label><input value={studentForm.name} onChange={e => handleAutoCaps(e, 'name', setStudentForm)} placeholder="Full name" className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Class *</label><select value={studentForm.class} onChange={e => { setStudentForm(prev => ({ ...prev, class: e.target.value, rollNumber: e.target.value ? generateRollNumber(e.target.value) : '' })); }} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Class --</option>{[...classes].sort().map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Package</label><select value={studentForm.package} onChange={e => handlePackageChange(e.target.value)} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Package --</option>{packages.map(p => <option key={p.name} value={p.name}>{p.name} (₹{p.amount.toLocaleString()})</option>)}<option value="Custom">Custom</option></select></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Fee Amount (₹) *</label><input type="number" value={studentForm.feeAmount || ''} onChange={e => setStudentForm(prev => ({ ...prev, feeAmount: parseFloat(e.target.value) || 0 }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Roll Number</label><input value={studentForm.rollNumber} readOnly className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-gray-500" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Gender</label><select value={studentForm.gender} onChange={e => setStudentForm(prev => ({ ...prev, gender: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option>MALE</option><option>FEMALE</option><option>OTHER</option></select></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Date of Birth</label><input type="date" value={studentForm.dateOfBirth} onChange={e => setStudentForm(prev => ({ ...prev, dateOfBirth: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Admission Date</label><input type="date" value={studentForm.admissionDate} onChange={e => setStudentForm(prev => ({ ...prev, admissionDate: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Parent / Guardian *</label><input value={studentForm.parentName} onChange={e => handleAutoCaps(e, 'parentName', setStudentForm)} placeholder="Parent name" className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Phone *</label><input value={studentForm.parentPhone} onChange={e => setStudentForm(prev => ({ ...prev, parentPhone: e.target.value }))} placeholder="Contact number" className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" value={studentForm.email} onChange={e => setStudentForm(prev => ({ ...prev, email: e.target.value }))} placeholder="Email (optional)" className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1 md:col-span-2"><label className="text-xs text-cyan-400">Address</label><input value={studentForm.address} onChange={e => setStudentForm(prev => ({ ...prev, address: e.target.value }))} placeholder="Home address" className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  {documentOptions.length > 0 && <div className="md:col-span-2 space-y-2"><label className="text-xs text-cyan-400">Submitted Documents</label><div className="flex flex-wrap gap-2">{documentOptions.map(doc => { const checked = (studentForm.submittedDocuments || []).includes(doc); return <label key={doc} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${checked ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><input type="checkbox" checked={checked} onChange={() => setStudentForm(prev => ({ ...prev, submittedDocuments: checked ? (prev.submittedDocuments || []).filter(d => d !== doc) : [...(prev.submittedDocuments || []), doc] }))} className="accent-emerald-500" />{doc}</label>; })}</div></div>}
+                </div>
+                {!isReadOnly && <button onClick={() => handleSaveStudent(true)} className="w-full mt-6 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">Save Student</button>}
+              </div>
+              <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-6">
+                <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><FiUsers className="text-cyan-400" />Recently Added</h3>
+                <div className="space-y-3">{students.filter(s => !isDeactivatedStudent(s)).slice(0, 6).map(s => (
+                  <div key={s.id} className="flex items-center justify-between gap-3 bg-gray-800/40 rounded-xl p-3">
+                    <div className="min-w-0"><p className="font-semibold text-sm truncate">{s.name}</p><p className="text-xs text-cyan-400 font-mono">{s.autoId} • {s.class || '-'}</p></div>
+                    <button onClick={() => openEditModal(s, 'student')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit"><FiEdit2 size={16} /></button>
+                  </div>
+                ))}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'deactivatestudent' && (() => {
+          const activeList = students.filter(s => !isDeactivatedStudent(s));
+          const deactivatedList = students.filter(s => isDeactivatedStudent(s));
+          const filteredActive = activeList.filter(s => (!deactClassFilter || s.class === deactClassFilter) && (s.name.toLowerCase().includes(deactSearch.toLowerCase()) || s.autoId.toLowerCase().includes(deactSearch.toLowerCase())));
+          const filteredDeactivated = deactivatedList.filter(s => (!deactClassFilter || s.class === deactClassFilter) && (s.name.toLowerCase().includes(deactSearch.toLowerCase()) || s.autoId.toLowerCase().includes(deactSearch.toLowerCase())));
+          const inputCls = "w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white";
+          return (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Students</p><p className="text-2xl font-bold text-cyan-400">{students.length}</p></div>
+                <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Active</p><p className="text-2xl font-bold text-emerald-400">{activeList.length}</p></div>
+                <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Deactivated</p><p className="text-2xl font-bold text-red-400">{deactivatedList.length}</p></div>
+                <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Refunds Paid</p><p className="text-2xl font-bold text-yellow-400">₹{deactivatedList.reduce((s, st) => s + (st.refundAmount || 0), 0).toLocaleString()}</p></div>
+              </div>
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name or ID..." value={deactSearch} onChange={e => setDeactSearch(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
+                <select value={deactClassFilter} onChange={e => setDeactClassFilter(e.target.value)} className="p-3 bg-[#1E1E1E] border border-gray-800 rounded-xl text-white focus:outline-none focus:border-cyan-500 transition min-w-[140px]">
+                  <option value="">All Classes</option>
+                  {[...new Set(students.map(s => s.class).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><FiUsers className="text-emerald-400" />Active Students <span className="text-xs text-gray-400 font-normal">({filteredActive.length})</span></h3></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-max">
+                  <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Class</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Fee (₹)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid (₹)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Balance (₹)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Action</th></tr></thead>
+                  <tbody>{filteredActive.map(s => {
+                    const info = getStudentPaymentInfo(s);
+                    return (
+                      <tr key={s.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
+                        <td className="px-6 py-4 font-mono text-cyan-400">{s.autoId}</td><td className="px-6 py-4 font-semibold">{s.name}</td><td className="px-6 py-4">{s.class}</td>
+                        <td className="px-6 py-4">₹{info.totalPackage.toLocaleString()}</td><td className="px-6 py-4 text-emerald-400">₹{info.totalPaid.toLocaleString()}</td><td className="px-6 py-4 text-yellow-400">₹{info.balance.toLocaleString()}</td>
+                        <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${info.paymentStatus === 'PAID' ? 'bg-emerald-500/20 text-emerald-400' : info.paymentStatus === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{info.paymentStatus}</span></td>
+                        <td className="px-6 py-4">{!isReadOnly && <button onClick={() => openDeactivateStudent(s)} className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/40 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition"><FiAlertTriangle size={14} />Deactivate</button>}</td>
+                      </tr>
+                    );
+                  })}
+                  {filteredActive.length === 0 && <tr><td colSpan={8} className="px-6 py-10 text-center text-gray-500">No active students found.</td></tr>}</tbody>
+                </table></div>
+              </div>
+
+              <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><FiAlertTriangle className="text-red-400" />Deactivated Students <span className="text-xs text-gray-400 font-normal">({filteredDeactivated.length})</span></h3></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-max">
+                  <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Class</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Deactivated On</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Reason</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Refund (₹)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
+                  <tbody>{filteredDeactivated.slice(0, showAllDeactivated ? undefined : 5).map(s => {
+                    const info = getStudentPaymentInfo(s);
+                    return (
+                      <tr key={s.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
+                        <td className="px-6 py-4 font-mono text-red-400">{s.autoId}</td><td className="px-6 py-4 font-semibold">{s.name}</td><td className="px-6 py-4">{s.class}</td>
+                        <td className="px-6 py-4 text-gray-400">{s.inactiveDate || '-'}</td><td className="px-6 py-4 text-gray-400 max-w-[200px] truncate" title={s.deactivationReason || ''}>{s.deactivationReason || '-'}</td>
+                        <td className="px-6 py-4">{s.refundAmount ? <span className="text-yellow-400 font-semibold">₹{s.refundAmount.toLocaleString()}</span> : info.totalPaid > 0 ? <span className="text-orange-400 text-xs font-semibold">Not refunded</span> : <span className="text-gray-600">—</span>}</td>
+                        <td className="px-6 py-4"><div className="flex gap-2">
+                          {info.totalPaid > 0 && !s.refundAmount && !isReadOnly && <button onClick={() => { setDeactTarget(s); setDeactStep('refund'); setRefundAmount(String(info.totalPaid)); setRefundDesc(''); }} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Record Refund"><FiDollarSign size={18} /></button>}
+                          <button onClick={() => exportStudentReturnPDF(s)} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Student Return PDF"><FiFileText size={18} /></button>
+                          {!isReadOnly && <button onClick={() => openEditModal(s, 'student')} className="text-blue-400 hover:text-blue-300 p-1 hover:bg-blue-500/20 rounded" title="Edit Student"><FiEdit2 size={18} /></button>}
+                          {!isReadOnly && <button onClick={() => handleReactivateStudent(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Reactivate Student"><FiRefreshCw size={18} /></button>}
+                        </div></td>
+                      </tr>
+                    );
+                  })}
+                  {filteredDeactivated.length === 0 && <tr><td colSpan={7} className="px-6 py-10 text-center text-gray-500">No deactivated students yet.</td></tr>}</tbody>
+                </table></div>
+                {filteredDeactivated.length > 5 && <div className="text-center py-4"><button onClick={() => setShowAllDeactivated(!showAllDeactivated)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllDeactivated ? 'Show Less' : `View All ${filteredDeactivated.length}`}</button></div>}
+              </div>
+
+              {deactTarget && (
+                <div className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                  <div className="bg-[#1E1E1E] border border-gray-800 rounded-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                    <div className="flex justify-between items-center border-b border-gray-800 mb-6 pb-4">
+                      <h3 className="font-bold text-2xl bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">{deactStep === 'confirm' ? 'Deactivate Student' : 'Student Refund / Reimbursement'}</h3>
+                      <button onClick={closeDeactModal} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={28} /></button>
+                    </div>
+                    {deactStep === 'confirm' ? (
+                      <>
+                        <div className="bg-gray-800/40 rounded-xl p-4 mb-5">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div><p className="text-lg font-bold">{deactTarget.name}</p><p className="text-sm text-cyan-400 font-mono">{deactTarget.autoId} • {deactTarget.class || '-'} • Roll {deactTarget.rollNumber || '-'}</p></div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-400">Total Paid</p><p className="text-xl font-bold text-emerald-400">₹{getStudentPaymentInfo(deactTarget).totalPaid.toLocaleString()}</p>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-2">On deactivation the Auto ID will change to <span className="text-red-400 font-mono font-semibold">D-{deactTarget.autoId}</span>. The student will be hidden from Student Add / Student List but will still appear in fee reports.</p>
+                        </div>
+                        <div className="space-y-4">
+                          <div className="space-y-1"><label className="text-xs text-cyan-400">Deactivation Date</label><input type="date" value={deactDate} onChange={e => setDeactDate(e.target.value)} className={inputCls} /></div>
+                          <div className="space-y-1"><label className="text-xs text-cyan-400">Deactivation Description</label><textarea value={deactReason} onChange={e => setDeactReason(e.target.value)} placeholder="Reason for deactivation..." className={inputCls + ' h-24'} /></div>
+                        </div>
+                        <div className="flex gap-3 mt-6">
+                          <button onClick={runDeactivateStudent} className="flex-1 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white p-4 rounded-lg font-bold shadow-lg shadow-red-500/20">Confirm Deactivate</button>
+                          <button onClick={closeDeactModal} className="px-6 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-semibold">Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="bg-gray-800/40 rounded-xl p-4 mb-5">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div><p className="text-lg font-bold">{deactTarget.name}</p><p className="text-sm text-red-400 font-mono">{deactTarget.autoId}</p></div>
+                            <div className="text-right"><p className="text-xs text-gray-400">Total Paid</p><p className="text-xl font-bold text-emerald-400">₹{getStudentPaymentInfo(deactTarget).totalPaid.toLocaleString()}</p></div>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-2">Record the amount to return. This will be added as a <span className="text-cyan-400 font-semibold">"Student Return"</span> expense and a Student Return PDF will be generated.</p>
+                        </div>
+                        <div className="space-y-4">
+                          <div className="space-y-1"><label className="text-xs text-cyan-400">Refund Amount (₹)</label><input type="number" min={0} value={refundAmount} onChange={e => setRefundAmount(e.target.value)} className={inputCls} /></div>
+                          <div className="space-y-1"><label className="text-xs text-cyan-400">Refund Description</label><textarea value={refundDesc} onChange={e => setRefundDesc(e.target.value)} placeholder="e.g., Full refund after deactivation" className={inputCls + ' h-24'} /></div>
+                          <div className="space-y-1"><label className="text-xs text-cyan-400">Refund Date</label><input type="date" value={deactDate} onChange={e => setDeactDate(e.target.value)} className={inputCls} /></div>
+                        </div>
+                        <div className="flex gap-3 mt-6">
+                          <button onClick={runStudentRefund} className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white p-4 rounded-lg font-bold shadow-lg shadow-emerald-500/20">Confirm Refund</button>
+                          <button onClick={() => { closeDeactModal(); showNotification('Student deactivated without refund', 'success'); }} className="px-6 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-semibold">Skip Refund</button>
+                          <button onClick={closeDeactModal} className="px-6 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-semibold">Cancel</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {activeTab === 'fees' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-7 gap-4">
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Total Fees</p><p className="text-2xl font-bold text-cyan-400">₹{students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + (st.feeAmount || 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Collected</p><p className="text-2xl font-bold text-emerald-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'paid').reduce((s, f) => s + f.amount, 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Unpaid Students</p><p className="text-2xl font-bold text-rose-400">{students.filter(st => st.status === 'ACTIVE' && getStudentPaymentInfo(st).balance > 0).length}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-emerald-500/40"><p className="text-gray-400 text-xs">Full Paid</p><p className="text-2xl font-bold text-emerald-400">{students.filter(st => st.status === 'ACTIVE' && getStudentPaymentInfo(st).paymentStatus === 'PAID').length}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-yellow-500/40"><p className="text-gray-400 text-xs">Partial</p><p className="text-2xl font-bold text-yellow-400">{students.filter(st => st.status === 'ACTIVE' && (getStudentPaymentInfo(st).paymentStatus === 'PARTIAL' || getStudentPaymentInfo(st).paymentStatus === 'OVERDUE')).length}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-rose-500/40"><p className="text-gray-400 text-xs">Unpaid</p><p className="text-2xl font-bold text-rose-400">{students.filter(st => st.status === 'ACTIVE' && getStudentPaymentInfo(st).paymentStatus === 'UNPAID').length}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-2xl font-bold text-yellow-400">₹{Math.max(students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + (st.feeAmount || 0), 0) - fees.filter(f => getEffectiveFeeStatus(f) === 'paid').reduce((s, f) => s + f.amount, 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-2xl font-bold text-red-400">₹{students.filter(st => st.status === 'ACTIVE').reduce((sum, st) => sum + getStudentPaymentInfo(st).totalOverdue, 0).toLocaleString()}</p></div>
             </div>
@@ -4246,7 +4643,7 @@ const App: React.FC = () => {
                 <option value="">All Classes</option>
                 {[...new Set(students.map(s => s.class).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Fee</button>}<button onClick={() => exportToExcel(fees, 'Fees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={exportFeeTransactionsPDF} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button><button onClick={() => exportStudentInvoicePDF(studentClassFilter || undefined)} className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiFileText size={18} />Invoice (A5)</button></div>
+              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Fee</button>}<button onClick={() => exportToExcel(fees, 'Fees')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={exportFeeTransactionsPDF} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>{!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}<button onClick={downloadSampleExcel} className={searchBtn + ' hover:border-purple-500/50'}><FiFileText size={18} />Sample</button><button onClick={() => exportStudentInvoicePDF(studentClassFilter || undefined)} className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiFileText size={18} />Invoice (A5)</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-max">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Type</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Description</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Due Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -4266,10 +4663,10 @@ const App: React.FC = () => {
         {activeTab === 'feesbystudent' && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Target</p><p className="text-xl font-bold text-cyan-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Target</p><p className="text-xl font-bold text-cyan-400">₹{students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0).toLocaleString()}</p></div>
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Collected</p><p className="text-xl font-bold text-emerald-400">₹{fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-xl font-bold text-yellow-400">₹{Math.max(students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0) - fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0), 0).toLocaleString()}</p></div>
-              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-xl font-bold text-red-400">₹{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + getStudentPaymentInfo(s).totalOverdue, 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Balance</p><p className="text-xl font-bold text-yellow-400">₹{Math.max(students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + (s.feeAmount || 0), 0) - fees.filter(f => getEffectiveFeeStatus(f) === 'paid').filter(f => { if (!studentClassFilter) return true; const st = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return st?.class === studentClassFilter; }).reduce((sum, f) => sum + f.amount, 0), 0).toLocaleString()}</p></div>
+              <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Overdue</p><p className="text-xl font-bold text-red-400">₹{students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).reduce((sum, s) => sum + getStudentPaymentInfo(s).totalOverdue, 0).toLocaleString()}</p></div>
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search student..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
@@ -4277,12 +4674,12 @@ const App: React.FC = () => {
                 <option value="">All Classes</option>
                 {[...new Set(students.map(s => s.class).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <button onClick={() => exportToExcel(students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).map(s => { const i = getStudentPaymentInfo(s); return { 'Auto ID': s.autoId, 'Name': s.name, 'Class': s.class, 'Package': i.totalPackage, 'Paid': i.totalPaid, 'Balance': i.balance, 'Overdue': i.totalOverdue, 'Status': i.paymentStatus }; }), 'Fees By Student')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button>
+              <button onClick={() => exportToExcel(students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).map(s => { const i = getStudentPaymentInfo(s); return { 'Auto ID': s.autoId, 'Name': s.name, 'Class': s.class, 'Package': i.totalPackage, 'Paid': i.totalPaid, 'Balance': i.balance, 'Overdue': i.totalOverdue, 'Status': i.paymentStatus }; }), 'Fees By Student')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button>
               <button onClick={() => exportFeesByStudentPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-max">
               <thead className="bg-gray-800/50"><tr><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Student</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Class</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Package</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Balance</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Overdue</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Progress</th><th className="px-4 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th></tr></thead>
-              <tbody>{students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllFeesByStudent ? undefined : 5).map(s => {
+              <tbody>{students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllFeesByStudent ? undefined : 5).map(s => {
                 const info = getStudentPaymentInfo(s);
                 const sc = info.paymentStatus === 'PAID' ? 'bg-emerald-500/20 text-emerald-400' : info.paymentStatus === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-400' : info.paymentStatus === 'OVERDUE' ? 'bg-red-500/20 text-red-400' : 'bg-red-500/20 text-red-400';
                 const pc = info.percentage >= 100 ? 'from-emerald-500 to-emerald-400' : info.percentage >= 50 ? 'from-cyan-500 to-blue-500' : info.percentage > 0 ? 'from-yellow-500 to-orange-500' : 'from-red-500 to-red-400';
@@ -4298,7 +4695,7 @@ const App: React.FC = () => {
                 </tr>);
               })}</tbody>
             </table></div></div>
-            {students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFeesByStudent ? 'Showing all' : `Showing 5 of ${students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllFeesByStudent(!showAllFeesByStudent)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFeesByStudent ? 'Show Less' : `View All ${students.filter(s => s.status === 'ACTIVE' && (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
+            {students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFeesByStudent ? 'Showing all' : `Showing 5 of ${students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllFeesByStudent(!showAllFeesByStudent)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFeesByStudent ? 'Show Less' : `View All ${students.filter(s => (!studentClassFilter || s.class === studentClassFilter)).filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.autoId.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
           </div>
         )}
 

@@ -127,7 +127,7 @@ export const deleteEmployee = async (id: string) => deleteDoc(doc(db, 'employees
 // JSON tree. Each person has ONE record per date using a deterministic key
 // "personId_date". RTDB does not require indexes, so saves never fail.
 
-import { ref as dbRef, set as rtdbSet, get as rtdbGet, remove as rtdbRemove, push as rtdbPush } from 'firebase/database';
+import { ref as dbRef, set as rtdbSet, get as rtdbGet, remove as rtdbRemove, push as rtdbPush, update as rtdbUpdate } from 'firebase/database';
 
 const sanitizeKey = (s: string) => s.replace(/[.#$\[\]\/]/g, '-'); // RTDB-safe key
 const makeAttKey = (personId: string, date: string) => sanitizeKey(`${personId}_${date}`);
@@ -457,5 +457,27 @@ export const deleteEquipment = async (id: string) =>
       updateDoc(doc(db, 'equipments', d.id), { assignedToId: newAutoId })
     )
   );
+
+  // RTDB attendance fallback (keys are deterministic "personId_date")
+  try {
+    const snap = await rtdbGet(dbRef(rtdb, 'attendance'));
+    if (snap.exists()) {
+      const val = snap.val();
+      const updates: Record<string, any> = {};
+      Object.keys(val).forEach(key => {
+        const rec = val[key];
+        if (rec && rec.personId === oldAutoId) {
+          const newKey = makeAttKey(newAutoId, rec.date || '');
+          if (newKey !== key) {
+            updates[newKey] = { ...rec, personId: newAutoId };
+            updates[key] = null;
+          }
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        await rtdbUpdate(dbRef(rtdb, 'attendance'), updates);
+      }
+    }
+  } catch (e) { /* RTDB not available — ignore */ }
 };
 
