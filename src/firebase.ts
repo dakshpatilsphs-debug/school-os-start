@@ -205,7 +205,34 @@ export const getAttendance = async () => {
 };
 
 export const deleteAttendance = async (personId: string, date: string) => {
-  await rtdbRemove(dbRef(rtdb, `attendance/${makeAttKey(personId, date)}`));
+  const key = makeAttKey(personId, date);
+  try { await rtdbRemove(dbRef(rtdb, `attendance/${key}`)); } catch (e) { /* ignore */ }
+  try { await deleteDoc(doc(db, 'attendance', key)); } catch (e) { /* ignore */ }
+};
+
+// Delete ALL student attendance records (personType === 'student') from both
+// RTDB and Firestore fallback. Returns number of records deleted.
+export const deleteAllStudentAttendance = async (): Promise<number> => {
+  let deleted = 0;
+  try {
+    const snap = await rtdbGet(dbRef(rtdb, 'attendance'));
+    if (snap.exists()) {
+      const val = snap.val();
+      const keys = Object.keys(val).filter(k => val[k]?.personType === 'student');
+      for (const k of keys) {
+        try { await rtdbRemove(dbRef(rtdb, `attendance/${k}`)); deleted++; } catch (e) { /* ignore */ }
+      }
+    }
+  } catch (e) { /* ignore */ }
+  try {
+    const snapshot = await getDocs(collection(db, 'attendance'));
+    for (const d of snapshot.docs) {
+      if (d.data()?.personType === 'student') {
+        try { await deleteDoc(d.ref); deleted++; } catch (e) { /* ignore */ }
+      }
+    }
+  } catch (e) { /* ignore */ }
+  return deleted;
 };
 
 // ===== Holiday Functions (Realtime Database + Firestore fallback) =====

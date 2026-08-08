@@ -164,6 +164,47 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     showNotification('Template downloaded', 'success');
   };
 
+  // ===== All Attendance Data (Excel) =====
+  const exportAllAttendanceExcel = () => {
+    if (attendance.length === 0) { showNotification('No attendance records to export', 'error'); return; }
+    const data = attendance.map(a => ({
+      'Auto ID': a.personId,
+      'Name': a.personName,
+      'Type': a.personType,
+      'Date': a.date,
+      'Status': a.status,
+      'Role': (a as any).role || '',
+      'CL Status': (a as any).clStatus || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `attendance_all.xlsx`);
+    showNotification(`Exported ${attendance.length} attendance records`, 'success');
+  };
+
+  // ===== All Expense Data (Excel) =====
+  const exportAllExpensesExcel = () => {
+    if (expenses.length === 0) { showNotification('No expense records to export', 'error'); return; }
+    const data = expenses.map(e => ({
+      'Auto ID': e.autoId,
+      'Category': e.category,
+      'Amount': e.amount,
+      'Description': e.description,
+      'Date': e.date,
+      'Paid To': e.paidTo,
+      'Status': e.status,
+      'Salary Month': e.salaryMonth || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
+    XLSX.writeFile(wb, `expenses_all.xlsx`);
+    showNotification(`Exported ${expenses.length} expense records`, 'success');
+  };
+
   const exportMonthlySalaryReport = () => {
     const currentMonth = selectedDate.substring(0, 7);
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
@@ -186,6 +227,67 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     showNotification('Monthly salary report exported', 'success');
   };
 
+  // ===== Attendance Expense PDF (monthly salary expense from attendance) =====
+  const exportAttendanceExpensePDF = () => {
+    const { currentMonth, monthName } = getMonthInfo();
+    const activeEmps = employees.filter(e => e.status === 'ACTIVE');
+    if (activeEmps.length === 0) { showNotification('No employees to export', 'error'); return; }
+
+    const doc = new jsPDF();
+    const pw = 210;
+
+    // Header
+    doc.setFillColor(0, 102, 204); doc.rect(0, 0, pw, 22, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text(`${(schoolSettings.schoolName || 'School OS').toUpperCase()} — Attendance Expense`, 14, 14);
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal');
+    doc.text(monthName, pw - 14, 14, { align: 'right' });
+
+    const rows = activeEmps.map(e => {
+      const info = getEmployeeSalaryInfo(e);
+      const otherDed = (e.monthDeduction?.[currentMonth] ?? e.otherDeduction) || 0;
+      const payable = Math.max(0, info.earnedSalary - otherDed);
+      const paid = isEmployeePaidForMonth(e, currentMonth);
+      return [
+        e.name,
+        e.role || '-',
+        String(info.presentDays),
+        String(info.absentDays),
+        String(info.workingDays),
+        String(Math.round(info.perDaySalary)),
+        String(info.earnedSalary),
+        String(payable),
+        paid ? 'Paid' : 'Pending',
+      ];
+    });
+
+    const totals = rows.reduce((acc, r) => {
+      acc.earned += parseInt(r[6]) || 0;
+      acc.payable += parseInt(r[7]) || 0;
+      return acc;
+    }, { earned: 0, payable: 0 });
+
+    autoTable(doc, {
+      head: [['Employee', 'Role', 'Present', 'Absent', 'Work Days', 'Per Day (Rs)', 'Earned (Rs)', 'Payable (Rs)', 'Status']],
+      body: rows,
+      foot: [['TOTAL', '', '', '', '', '', String(totals.earned), String(totals.payable), '']],
+      startY: 28,
+      theme: 'striped',
+      styles: { fontSize: 8.5, cellPadding: 3 },
+      headStyles: { fillColor: [0, 102, 204], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold' },
+      footStyles: { fillColor: [240, 240, 240], textColor: [30, 41, 59], fontStyle: 'bold' },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 7) data.cell.styles.fontStyle = 'bold';
+        if (data.section === 'body' && data.column.index === 8) {
+          data.cell.styles.textColor = String(data.cell.raw) === 'Paid' ? [16, 185, 129] : [234, 179, 8];
+        }
+      },
+    });
+
+    doc.save(`attendance_expense_${currentMonth}.pdf`);
+    showNotification('Attendance expense PDF exported', 'success');
+  };
+
   // ===== Monthly Attendance Grid Helpers =====
   const getMonthInfo = () => {
     const currentMonth = selectedDate.substring(0, 7); // YYYY-MM
@@ -195,8 +297,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     return { currentMonth, year, month, daysInMonth, monthName };
   };
 
-  const getMonthlyStatus = (personId: string, day: number): string => {
-    const { currentMonth } = getMonthInfo();
+  const getMonthlyStatus = (personId: string, day: number, month?: string): string => {
+    const currentMonth = month || getMonthInfo().currentMonth;
     const dateStr = `${currentMonth}-${day.toString().padStart(2, '0')}`;
     if (isHoliday(dateStr)) return 'H';
     const rec = attendance.find(a => a.personId === personId && a.date === dateStr);
@@ -310,6 +412,53 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     XLSX.utils.book_append_sheet(wb, ws, 'Monthly Attendance');
     XLSX.writeFile(wb, `employee_monthly_attendance_${currentMonth}.xlsx`);
     showNotification(`Monthly attendance grid exported`, 'success');
+  };
+
+  // ===== Full Attendance Excel — one grid sheet per month (all months) =====
+  const exportAllMonthsAttendanceExcel = () => {
+    const persons = employees.filter(e => e.status === 'ACTIVE');
+    if (persons.length === 0) { showNotification('No employees to export', 'error'); return; }
+
+    const months = [...new Set(attendance.filter(a => a.personType === 'employee' && a.date).map(a => a.date.substring(0, 7)))].filter(Boolean).sort();
+    const effectiveMonths = months.length > 0 ? months : [getMonthInfo().currentMonth];
+
+    const wb = XLSX.utils.book_new();
+
+    effectiveMonths.forEach(month => {
+      const [year, m] = month.split('-').map(Number);
+      const daysInMonth = new Date(year, m, 0).getDate();
+      const monthName = new Date(year, m - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      const header: string[] = ['Name', 'Auto ID'];
+      for (let d = 1; d <= daysInMonth; d++) header.push(String(d));
+      header.push('Present', 'Absent', '% ');
+
+      const rows: any[][] = persons.map(p => {
+        const row: any[] = [p.name, p.autoId];
+        let present = 0, absent = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const st = getMonthlyStatus(p.autoId, d, month);
+          row.push(st);
+          if (st === 'P' || st === 'L') present++;
+          if (st === 'A' || st === 'C') absent++;
+        }
+        const pct = (present + absent) > 0 ? Math.round((present / (present + absent)) * 100) : 0;
+        row.push(present, absent, `${pct}%`);
+        return row;
+      });
+
+      const aoa: any[][] = [[`EMPLOYEE ATTENDANCE — ${monthName}`]];
+      aoa.push(header);
+      rows.forEach(r => aoa.push(r));
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, ...Array(daysInMonth).fill({ wch: 4 }), { wch: 8 }, { wch: 8 }, { wch: 6 }];
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
+      XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 31));
+    });
+
+    XLSX.writeFile(wb, `employee_attendance_all_months.xlsx`);
+    showNotification(`Exported full attendance for ${effectiveMonths.length} month(s)`, 'success');
   };
 
   // ===== Monthly Attendance PDF (Grid Format - Landscape) =====
@@ -934,6 +1083,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             <div className="flex flex-wrap gap-2">
               <button onClick={() => exportMonthlyGridExcel()} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />Monthly Excel</button>
               <button onClick={() => exportMonthlyGridPDF()} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-4 py-2 rounded-lg text-sm"><FiFileText size={16} />Monthly PDF</button>
+              <button onClick={exportAllAttendanceExcel} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />All Attendance (Excel)</button>
+              <button onClick={exportAllExpensesExcel} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-yellow-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />All Expenses (Excel)</button>
+              <button onClick={exportAllMonthsAttendanceExcel} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-purple-500/50 px-4 py-2 rounded-lg text-sm"><FiDownload size={16} />Full Attendance (All Months)</button>
               <button onClick={() => exportSalarySlips()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>
             </div>
           </div>
@@ -958,6 +1110,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       {showSalaryCalc ? <FiEyeOff size={16} /> : <FiEye size={16} />}{showSalaryCalc ? 'Hide' : 'Show'}
                     </button>
                     <button onClick={exportMonthlySalaryReport} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-5 py-2 rounded-xl self-start"><FiDownload size={16} />Monthly Salary Report (Excel)</button>
+                    <button onClick={exportAttendanceExpensePDF} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-5 py-2 rounded-xl self-start"><FiFileText size={16} />Attendance Expense (PDF)</button>
                   </div>
                 </div>
                 {showSalaryCalc && (

@@ -14,7 +14,7 @@ import {
   addExpense, getExpenses, updateExpense, deleteExpense,
   addEmployee, getEmployees, updateEmployee, deleteEmployee,
   addEquipment, getEquipments, updateEquipment, deleteEquipment,
-  saveAttendance, getAttendance, deleteAttendance,
+  saveAttendance, getAttendance, deleteAttendance, deleteAllStudentAttendance,
   addHoliday, getHolidays, deleteHoliday,
   getNextSequentialId,
   uploadImage, generateAutoId,
@@ -45,6 +45,7 @@ const App: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [attendance, setAttendance] = useState<Att[]>([]);
+  const [deletingStudentAttendance, setDeletingStudentAttendance] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [docEditSelectedStudents, setDocEditSelectedStudents] = useState<string[]>([]);
   const [docEditSearch, setDocEditSearch] = useState('');
@@ -1003,6 +1004,23 @@ const App: React.FC = () => {
       showNotification(`Student reactivated → ${newAutoId}${refundExpenses.length ? ' · refund expense deleted' : ''}`, 'success');
     } catch (error) {
       showFirebaseError(error, 'Failed to reactivate student');
+    }
+  };
+
+  const handleDeleteAllStudentAttendance = async () => {
+    if (isReadOnly) { showNotification('Read-only mode: cannot delete', 'error'); return; }
+    const count = attendance.filter(a => a.personType === 'student').length;
+    if (count === 0) { showNotification('No student attendance records to delete', 'error'); return; }
+    if (!confirm(`TEMP TOOL: Delete ALL ${count} student attendance records from the database? This cannot be undone.`)) return;
+    setDeletingStudentAttendance(true);
+    try {
+      const deleted = await deleteAllStudentAttendance();
+      await loadData();
+      showNotification(`Deleted ${deleted} student attendance record(s)`, 'success');
+    } catch (error) {
+      showFirebaseError(error, 'Failed to delete student attendance');
+    } finally {
+      setDeletingStudentAttendance(false);
     }
   };
 
@@ -4381,22 +4399,35 @@ const App: React.FC = () => {
 
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
-          <AttendanceSection
-            employees={employees}
-            attendance={attendance}
-            holidays={holidays}
-            expenses={expenses}
-            schoolSettings={schoolSettings}
-            isReadOnly={isReadOnly}
-            saveAttendance={saveAttendance}
-            addHoliday={addHoliday}
-            deleteHoliday={deleteHoliday}
-            showNotification={showNotification}
-            loadData={loadData}
-            logSalarySlipAudit={logSalarySlipAudit}
-            updateEmployee={updateEmployee}
-            handleDirectSalaryPay={handleDirectSalaryPay}
-          />
+          <div className="space-y-6">
+            {!isReadOnly && (
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-red-500/5 border border-red-500/20 rounded-2xl p-4">
+                <div>
+                  <p className="font-semibold text-red-400 flex items-center gap-2"><FiAlertTriangle size={16} /> Temporary Tool</p>
+                  <p className="text-xs text-gray-400 mt-1">{attendance.filter(a => a.personType === 'student').length} student attendance record(s) currently stored. This deletes all student attendance from the database.</p>
+                </div>
+                <button onClick={handleDeleteAllStudentAttendance} disabled={deletingStudentAttendance} className="flex items-center gap-2 bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-red-500/20 disabled:opacity-50">
+                  <FiTrash2 size={18} />{deletingStudentAttendance ? 'Deleting...' : 'Delete All Student Attendance'}
+                </button>
+              </div>
+            )}
+            <AttendanceSection
+              employees={employees}
+              attendance={attendance}
+              holidays={holidays}
+              expenses={expenses}
+              schoolSettings={schoolSettings}
+              isReadOnly={isReadOnly}
+              saveAttendance={saveAttendance}
+              addHoliday={addHoliday}
+              deleteHoliday={deleteHoliday}
+              showNotification={showNotification}
+              loadData={loadData}
+              logSalarySlipAudit={logSalarySlipAudit}
+              updateEmployee={updateEmployee}
+              handleDirectSalaryPay={handleDirectSalaryPay}
+            />
+          </div>
         )}
 
         {activeTab === 'dashboard' && (
