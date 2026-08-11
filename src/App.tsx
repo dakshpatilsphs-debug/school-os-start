@@ -14,7 +14,7 @@ import {
   addExpense, getExpenses, updateExpense, deleteExpense,
   addEmployee, getEmployees, updateEmployee, deleteEmployee,
   addEquipment, getEquipments, updateEquipment, deleteEquipment,
-  saveAttendance, getAttendance, deleteAttendance, deleteAllStudentAttendance,
+  saveAttendance, getAttendance, deleteAttendance,
   addHoliday, getHolidays, deleteHoliday,
   getNextSequentialId,
   uploadImage, generateAutoId,
@@ -45,7 +45,6 @@ const App: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [attendance, setAttendance] = useState<Att[]>([]);
-  const [deletingStudentAttendance, setDeletingStudentAttendance] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [docEditSelectedStudents, setDocEditSelectedStudents] = useState<string[]>([]);
   const [docEditSearch, setDocEditSearch] = useState('');
@@ -1007,23 +1006,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteAllStudentAttendance = async () => {
-    if (isReadOnly) { showNotification('Read-only mode: cannot delete', 'error'); return; }
-    const count = attendance.filter(a => a.personType === 'student').length;
-    if (count === 0) { showNotification('No student attendance records to delete', 'error'); return; }
-    if (!confirm(`TEMP TOOL: Delete ALL ${count} student attendance records from the database? This cannot be undone.`)) return;
-    setDeletingStudentAttendance(true);
-    try {
-      const deleted = await deleteAllStudentAttendance();
-      await loadData();
-      showNotification(`Deleted ${deleted} student attendance record(s)`, 'success');
-    } catch (error) {
-      showFirebaseError(error, 'Failed to delete student attendance');
-    } finally {
-      setDeletingStudentAttendance(false);
-    }
-  };
-
   const handleDirectSalaryPay = async (expense: any) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
     try {
@@ -1033,6 +1015,17 @@ const App: React.FC = () => {
       loadData();
       showNotification(`Salary expense added for ${final.paidTo} — ₹${Number(final.amount || 0).toLocaleString()}`, 'success');
     } catch (error) { showFirebaseError(error, 'Failed to add salary expense'); }
+  };
+  const handleDeleteSalaryExpenses = async (expenses: any[]) => {
+    if (isReadOnly) { showNotification('Read-only mode: cannot delete expense', 'error'); return; }
+    if (!expenses || expenses.length === 0) return;
+    const label = expenses.length === 1 ? `salary expense ${expenses[0].autoId || ''}` : `${expenses.length} salary expenses`;
+    if (!confirm(`Delete ${label} for ${expenses[0].paidTo || 'employee'}? The employee will be marked unpaid.`)) return;
+    try {
+      for (const e of expenses) await deleteExpense(e.id!);
+      await loadData();
+      showNotification('Salary expense deleted — employee marked unpaid', 'success');
+    } catch (error) { showFirebaseError(error, 'Failed to delete salary expense'); }
   };
   const handleToggleEmployeeHidden = async (emp: Employee) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot change visibility', 'error'); return; }
@@ -4400,17 +4393,6 @@ const App: React.FC = () => {
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
           <div className="space-y-6">
-            {!isReadOnly && (
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-red-500/5 border border-red-500/20 rounded-2xl p-4">
-                <div>
-                  <p className="font-semibold text-red-400 flex items-center gap-2"><FiAlertTriangle size={16} /> Temporary Tool</p>
-                  <p className="text-xs text-gray-400 mt-1">{attendance.filter(a => a.personType === 'student').length} student attendance record(s) currently stored. This deletes all student attendance from the database.</p>
-                </div>
-                <button onClick={handleDeleteAllStudentAttendance} disabled={deletingStudentAttendance} className="flex items-center gap-2 bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-red-500/20 disabled:opacity-50">
-                  <FiTrash2 size={18} />{deletingStudentAttendance ? 'Deleting...' : 'Delete All Student Attendance'}
-                </button>
-              </div>
-            )}
             <AttendanceSection
               employees={employees}
               attendance={attendance}
@@ -4426,6 +4408,7 @@ const App: React.FC = () => {
               logSalarySlipAudit={logSalarySlipAudit}
               updateEmployee={updateEmployee}
               handleDirectSalaryPay={handleDirectSalaryPay}
+              deleteSalaryExpenses={handleDeleteSalaryExpenses}
             />
           </div>
         )}
@@ -4740,7 +4723,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col gap-3">
               <div className="relative w-full"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, or role..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}{!isReadOnly && <button onClick={() => setShowHiddenEmployees(v => !v)} className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border transition ${showHiddenEmployees ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 hover:border-cyan-500'}`}><FiEye size={16} />{showHiddenEmployees ? 'Hide Hidden' : `Show Hidden (${employees.filter(e => e.hidden).length})`}</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr   className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(visibleEmployeesForPage, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
+              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}{!isReadOnly && <button onClick={() => setShowHiddenEmployees(v => !v)} className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border transition ${showHiddenEmployees ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 hover:border-cyan-500'}`}><FiEye size={16} />{showHiddenEmployees ? 'Hide Hidden' : `Show Hidden (${employees.filter(e => e.hidden).length})`}</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr   className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(visibleEmployeesForPage, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Net Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Deduction</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -4878,7 +4861,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search description or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportExpenseReportPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button></div>
+              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportExpenseReportPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>{!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}</div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Category</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid To</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -5291,6 +5274,8 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [saveProgress, setSaveProgress] = useState<{ current: number; total: number } | null>(null);
   const [secondarySaving, setSecondarySaving] = useState(false);
+  const [feeStudentFilter, setFeeStudentFilter] = useState('');
+  const [insertPos, setInsertPos] = useState('');
 
   const getSource = () => {
     switch (entityType) {
@@ -5303,7 +5288,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       case 'employees':
         return employees.map(e => ({ firestoreId: e.id || '', autoId: e.autoId, name: e.name }));
       case 'fees':
-        return fees.map(f => ({ firestoreId: f.id || '', autoId: f.autoId, name: f.studentName || f.autoId }));
+        return fees.map(f => ({ firestoreId: f.id || '', autoId: f.autoId, name: f.studentName || f.autoId, studentId: f.studentId || '' }));
       case 'expenses':
         return expenses.map(e => ({ firestoreId: e.id || '', autoId: e.autoId, name: e.paidTo || e.description || e.autoId }));
       case 'equipments':
@@ -5317,10 +5302,19 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
     setFilterText('');
     setFilterClass('');
     setSelectedIds(new Set());
+    setFeeStudentFilter('');
+    setInsertPos('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, students, employees, fees, expenses, equipments]);
 
   const filterable = entityType === 'students';
+  const selectedFeeStudent = feeStudentFilter ? students.find(s => s.autoId === feeStudentFilter) : undefined;
+  const feeStudentMatches = (item: any) =>
+    selectedFeeStudent != null &&
+    (item.studentId === selectedFeeStudent.autoId || item.name === selectedFeeStudent.name);
+
+  const showCheckboxes = filterable || (entityType === 'fees' && !!feeStudentFilter);
+
   const displayItems = filterable
     ? items.filter(item => {
         const matchText = !filterText ||
@@ -5331,7 +5325,9 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
         const matchClass = !filterClass || item.class === filterClass;
         return matchText && matchClass;
       })
-    : items;
+    : (entityType === 'fees' && feeStudentFilter
+        ? items.filter(feeStudentMatches)
+        : items);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -5354,9 +5350,13 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       entityType === 'fees' ? 'FEE-' :
       entityType === 'expenses' ? 'EXP-' : 'EQP-';
     const next = [...items];
+    let seq = 0;
     for (let i = 0; i < next.length; i++) {
       if (selectedIds.has(next[i].firestoreId)) {
-        next[i] = { ...next[i], autoId: `${prefix}${i + 1}` };
+        seq++;
+        next[i] = { ...next[i], autoId: entityType === 'fees' && feeStudentFilter
+          ? `${prefix}${String(seq).padStart(3, '0')}`
+          : `${prefix}${i + 1}` };
       }
     }
     setItems(next);
@@ -5395,10 +5395,31 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       entityType === 'employees' ? 'EMP-' :
       entityType === 'fees' ? 'FEE-' :
       entityType === 'expenses' ? 'EXP-' : 'EQP-';
+    if (entityType === 'fees') {
+      const next = items.map((item, i) => ({ ...item, autoId: `${prefix}${String(i + 1).padStart(3, '0')}` }));
+      setItems(next);
+      setDirty(true);
+      return;
+    }
     const total = items.length;
     const next = items.map((item, i) => ({ ...item, autoId: `${prefix}${total - i}` }));
     setItems(next);
     setDirty(true);
+  };
+
+  const insertSelectedStudentAt = (afterRow: number) => {
+    if (entityType !== 'fees' || !selectedFeeStudent) return;
+    const prefix = 'FEE-';
+    const matchIds = new Set(items.filter(feeStudentMatches).map(m => m.firestoreId));
+    const block = items.filter(it => matchIds.has(it.firestoreId));
+    const rest = items.filter(it => !matchIds.has(it.firestoreId));
+    const target = Math.max(0, Math.min(afterRow, rest.length));
+    const next = [...rest.slice(0, target), ...block, ...rest.slice(target)]
+      .map((it, i) => ({ ...it, autoId: `${prefix}${String(i + 1).padStart(3, '0')}` }));
+    setItems(next);
+    setDirty(true);
+    setInsertPos('');
+    showNotification(`Inserted ${block.length} fee record(s) after row ${target} and renumbered FEE-001 upward`, 'success');
   };
 
   const sortByAutoId = () => {
@@ -5558,7 +5579,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       )}
 
       <div className="flex items-center gap-3 text-sm flex-wrap">
-        <span className="text-gray-400">{items.length} record(s)</span>
+        <span className="text-gray-400">{feeStudentFilter ? displayItems.length + ' of ' + items.length : items.length} record(s)</span>
         {dirty && <span className="flex items-center gap-1 text-yellow-400"><FiAlertTriangle size={14} />Unsaved changes</span>}
         {filterable && (
           <>
@@ -5575,6 +5596,38 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
             </div>
           </>
         )}
+        {entityType === 'fees' && (
+          <div className="relative flex-1 max-w-xs">
+            <FiUsers size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+            <select value={feeStudentFilter}
+              onChange={e => { setFeeStudentFilter(e.target.value); setSelectedIds(new Set()); setInsertPos(''); }}
+              className="w-full p-2 pl-8 bg-[#1E1E1E] border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500">
+              <option value="">All Students (whole Fees list)</option>
+              {students.filter(s => s.autoId && (s.status === 'ACTIVE' || fees.some(f => f.studentId === s.autoId) || fees.some(f => f.studentName === s.name)))
+                .map(s => (
+                  <option key={s.autoId} value={s.autoId}>{s.autoId} — {s.name}</option>
+                ))}
+            </select>
+          </div>
+        )}
+        {entityType === 'fees' && feeStudentFilter && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-gray-400 text-xs">Insert this student after row #</span>
+            <input type="number" min={0} max={items.length} value={insertPos}
+              onChange={e => setInsertPos(e.target.value)}
+              placeholder="0"
+              className="w-20 p-2 bg-[#1E1E1E] border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500" />
+            <button onClick={() => insertSelectedStudentAt(insertPos ? Math.max(0, parseInt(insertPos) || 0) : 0)}
+              disabled={isReadOnly}
+              className="px-3 py-2 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-teal-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+              <FiCheck size={14} />Insert &amp; Renumber
+            </button>
+            <button onClick={() => insertSelectedStudentAt(0)} disabled={isReadOnly}
+              className="px-3 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-teal-500 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">To Start</button>
+            <button onClick={() => insertSelectedStudentAt(items.length)} disabled={isReadOnly}
+              className="px-3 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-teal-500 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">To End</button>
+          </div>
+        )}
       </div>
 
       <div className="bg-[#1E1E1E] border border-gray-800 rounded-2xl overflow-hidden">
@@ -5582,7 +5635,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
           <table className="w-full">
             <thead>
               <tr className="bg-gray-800/50">
-                {filterable && (
+                {showCheckboxes && (
                   <th className="px-2 py-3 w-10">
                     <input type="checkbox" checked={displayItems.length > 0 && displayItems.every(i => selectedIds.has(i.firestoreId))}
                       onChange={toggleSelectAll} className="accent-cyan-500 w-4 h-4 cursor-pointer" />
@@ -5600,7 +5653,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={entityType === 'students' ? 7 : 4} className="px-4 py-12 text-center text-gray-500">No records found.</td></tr>
+                <tr><td colSpan={showCheckboxes ? (entityType === 'students' ? 7 : 5) : 4} className="px-4 py-12 text-center text-gray-500">No records found.</td></tr>
               ) : displayItems.map((item, i) => (
                 <tr key={item.firestoreId || i}
                   draggable
@@ -5610,7 +5663,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
                   className={`border-t border-gray-800 transition cursor-grab active:cursor-grabbing ${
                     selectedIds.has(item.firestoreId) ? 'bg-cyan-500/5' : 'hover:bg-gray-800/30'
                   } ${dragIndex === items.indexOf(item) ? 'opacity-50' : ''}`}>
-                  {filterable && (
+                  {showCheckboxes && (
                     <td className="px-2 py-3">
                       <input type="checkbox" checked={selectedIds.has(item.firestoreId)}
                         onChange={() => toggleSelect(item.firestoreId)} className="accent-cyan-500 w-4 h-4 cursor-pointer" />
@@ -5663,7 +5716,11 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       <p className="text-xs text-gray-500">
         Reorder items using the arrow buttons, then click <strong>Auto Re-sequence</strong> to assign sequential AUTO IDs,
         or edit any field directly. For students, changing the class or roll number will be reflected across Fees by Student
-        and Fees &amp; Billing after saving. Click <strong>Save All Changes</strong> to persist to the database.
+        and Fees &amp; Billing after saving. For <strong>Fees</strong>, pick any student (even one with a single entry) from the
+        dropdown; their fee rows appear as one block. Use <strong>Insert this student after row #</strong> (or To Start / To End) to
+        place the block anywhere in the list — the fees are then auto-renumbered from <strong>FEE-001</strong> upward, so whatever
+        entry sits after <strong>FEE-001</strong> becomes <strong>FEE-002</strong>, and so on. The student&apos;s own data and AUTO ID stay untouched.
+        Click <strong>Save All Changes</strong> to persist to the database.
       </p>
     </div>
   );

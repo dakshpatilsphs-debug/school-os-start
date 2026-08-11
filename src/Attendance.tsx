@@ -22,6 +22,7 @@ interface AttendanceProps {
   logSalarySlipAudit?: (employeeId: string) => Promise<void>;
   updateEmployee: (id: string, data: any) => Promise<void>;
   handleDirectSalaryPay?: (expense: any) => Promise<void>;
+  deleteSalaryExpenses?: (expenses: Expense[]) => Promise<void>;
 }
 
 // Check if a date is a Sunday (auto holiday)
@@ -38,7 +39,7 @@ const isManualHoliday = (dateStr: string, holidays: Holiday[]) => {
 export const AttendanceSection: React.FC<AttendanceProps> = ({
   employees, attendance, holidays, expenses, schoolSettings, isReadOnly,
   saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
-  logSalarySlipAudit, updateEmployee, handleDirectSalaryPay
+  logSalarySlipAudit, updateEmployee, handleDirectSalaryPay, deleteSalaryExpenses
 }) => {
   const [subTab, setSubTab] = useState<'employee' | 'holidays' | 'causalLeaves'>('employee');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -943,13 +944,17 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   const dayLabel = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const statusInfo = dateStatus(selectedDate);
 
-  const isEmployeePaidForMonth = (emp: Employee, month: string) => {
-    return expenses.some(e =>
+  const getPaidSalaryExpenses = (emp: Employee, month: string) => {
+    return expenses.filter(e =>
       e.employeeId === emp.autoId &&
       e.category === 'Salaries' &&
       e.status === 'paid' &&
       ((e.salaryMonth || '') === month || (e.date || '').startsWith(month))
     );
+  };
+
+  const isEmployeePaidForMonth = (emp: Employee, month: string) => {
+    return getPaidSalaryExpenses(emp, month).length > 0;
   };
 
   return (
@@ -1138,7 +1143,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const effAbsent = info.absentDays;
                         const effSalary = info.earnedSalary;
                         const clLeft = remainingAnnual;
-                        const paid = isEmployeePaidForMonth(e, selectedDate.substring(0, 7));
+                        const paidExpenses = getPaidSalaryExpenses(e, selectedDate.substring(0, 7));
+                        const paid = paidExpenses.length > 0;
                         return (
                           <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>
@@ -1150,9 +1156,20 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                             <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
                             <td className="px-4 py-3">
                               {paid ? (
-                                <span className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-semibold rounded-lg border border-red-500/30">
-                                  <FiCheck size={13} /> Paid
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-semibold rounded-lg border border-red-500/30">
+                                    <FiCheck size={13} /> Paid
+                                  </span>
+                                  {!isReadOnly && deleteSalaryExpenses && (
+                                    <button
+                                      onClick={() => deleteSalaryExpenses(paidExpenses)}
+                                      title={`Delete salary expense for ${e.name} — reverts to unpaid`}
+                                      className="flex items-center gap-1 px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 text-xs font-semibold rounded-lg border border-red-500/30 transition"
+                                    >
+                                      <FiTrash2 size={13} /> Unpay
+                                    </button>
+                                  )}
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => openDirectPay(e, effSalary)}

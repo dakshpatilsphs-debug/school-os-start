@@ -1,98 +1,32 @@
-# School Management Tracking System
+# AGENTS.md
+
+School OS — a single-page React school-management app (students, fees, expenses, employees, equipment, attendance, schedules, PDF reports, AI assistant). All data logic is browser-side; there is no backend besides Firebase.
 
 ## Commands
-```sh
-npm run dev       # Vite dev server
-npm run build     # Production build (single-file SPA via vite-plugin-singlefile)
-npm run preview   # Preview production build
-```
+
+- `npm run dev` — Vite dev server
+- `npm run build` — production build via `vite-plugin-singlefile` (inlines everything into one `dist/index.html`)
+- `npm run preview` — preview the built file
+- There is **no** test, lint, or typecheck script. TypeScript config is `strict: true`, but `noUnusedLocals`/`noUnusedParameters` are off.
 
 ## Architecture
 
-- **Single-page React (19) app** bundled into `dist/index.html` — no code-splitting or routing lib (simple tab-based navigation via `activeTab` state in `App.tsx:38`)
-- **Build output**: one `index.html` containing inlined JS + CSS (vite-plugin-singlefile). No chunked assets deployed.
-- **State**: all data loaded eagerly into React state arrays from Firestore on mount (`loadData` in `App.tsx`). No context/Redux — props drilled to child components.
-- **Styling**: Tailwind CSS v4 (`@tailwindcss/vite` plugin). Config-free (v4 uses CSS-first config).
-- **No test framework** configured.
+- `src/App.tsx` (~5,700 lines) is a single monolithic component: all screens, forms, state, charts (recharts), PDF generation, and the sidebar are here. Tabs are a string-union `Tab` type (see `App.tsx:36`) — add a new screen by adding a Tab value, a sidebar entry, and a render branch.
+- `src/firebase.ts` is the entire data layer: Firestore (students, fees, expenses, employees, equipments, subjects, subjectConfigs, teacherSubjects, timetable, causalLeaves, salarySlipAudits) plus Realtime Database (attendance, holidays).
+- `src/Modals.tsx` ↔ `AppModals` (add/edit dialogs), `src/Attendance.tsx` ↔ `AttendanceSection`, `src/Schedule.tsx` ↔ `ScheduleSection` (timetable), `src/components/AIAssistant.tsx` (OpenRouter chat), `src/clUtils.ts` (casual-leave math), `src/PDFHelper.ts` (shared PDF header/footer/cover helpers).
+- Repo-local feature-request docs you may be asked to implement: `STUDENT-ADD-UPDATE.md`, `Student_Register_2026-08-05 (1).md`. `repomix-output.xml` is a stale code dump; `README.md` is a UTF-16 placeholder containing only `# school-os-start`. `dist/` and `node_modules/` are gitignored build output.
 
-## Firebase
+## Firebase / data gotchas
 
-- **Config**: hardcoded in `src/firebase.ts:7-16` (school-tack project)
-- **Firestore** for all CRUD data (students, fees, expenses, employees, equipment, attendance, holidays, reminders, subjects, schedules, subjectConfigs)
-- **Storage** for bill images, accessed via `uploadImage` / `getDownloadURL`
-- **Auth** unused (`getAuth` imported but never called)
-- **`cleanData()`** (`firebase.ts:26-34`) strips `undefined`/`null` before writes to avoid "Unsupported field value" errors — always call before `addDoc`/`updateDoc`
-- **`generateAutoId(prefix?)`** (`firebase.ts:38-44`) creates IDs like `MtsA0001` prefix + timestamp + seq + random; used for all entities
+- The Firestore project (`school-tack`) is hard-coded in `src/firebase.ts` — no env vars involved. `.env` only carries the optional `VITE_OPENROUTER_KEY` / `VITE_OPENROUTER_MODEL` for the AI assistant; builds work without it.
+- Attendance + holidays save to RTDB first, then **auto-fallback to Firestore** on failure (`saveAttendance`, `saveBatchAttendance`). Reads merge both sources and de-dupe by `personId_date`. RTDB keys are sanitized (`makeAttKey`, replaces `. # $ [ ] /`), so record key = `{personId}_{date}`.
+- There is no Firestore emulator / offline setup and no write-through SDK: you're hitting the real project from the browser. Anything needing custom Firestore composite indexes will fail at deploy — `getFeesByDateRange` deliberately runs two separate queries and merges, because Firestore can't OR across fields.
+- Firestore cannot store `undefined`. Writes must go through `cleanData()` (strips undefined/null) — remember this when adding new save paths. `updateStudentAutoIdReferences` must be used when an autoId changes (updates fees, equipment, and attendance).
 
-## Key Files & Ownership
+## Conventions to follow
 
-| File | Scope |
-|------|-------|
-| `src/App.tsx` | Main app shell, all CRUD handlers, all PDF exports, tab routing, settings modal trigger |
-| `src/Attendance.tsx` | Student & employee attendance UI, casual leaves, salary slip drawing |
-| `src/Schedule.tsx` | Subjects, teacher-subject assignments, timetable grid & auto-generate, subject configs, timetable PDF |
-| `src/Modals.tsx` | All add/edit forms (renderStudent, renderFee, renderEmployee, renderSettings, offer letter editor, etc.) |
-| `src/firebase.ts` | All Firestore/Storage operations, one function per collection |
-| `src/types.tsx` | All TypeScript interfaces (Employee, Student, SubjectConfig, TimetableEntry, etc.) |
-| `src/PDFHelper.ts` | Shared PDF design system: `getPDFColorsFromSettings`, `drawHeader`, `drawFooter`, `drawCoverPage` |
-
-## PDF Export Conventions
-
-- All PDF exports use `jsPDF` + `jspdf-autotable`. Pass `schoolSettings` for theming.
-- Use `getPDFColorsFromSettings(schoolSettings)` to get `PDFColors` object with `primary`, `secondary`, `dark`, `muted`, `light`, `lighter`, `white`, `border` tuples.
-- Reuse `drawHeader`/`drawFooter` from `PDFHelper.ts` for consistent school branding (logo, name, header band, page numbers).
-- `showNotification(msg, type)` only accepts `'success' | 'error'` — never `'info'`.
-
-## Employee `inactiveDate` Behavior
-
-- Employees with `status: 'INACTIVE'` have an `inactiveDate` field.
-- The Employee Report (`exportEmployeeReportPDF` in `App.tsx:1530`) includes inactive employees for months on or before their `inactiveDate`, but excludes them for months after.
-- Salary auto-refresh only counts 30 days after `inactiveDate` for salary purposes.
-- `Modals.tsx:488` shows inactive date picker when status is set to INACTIVE.
-
-## Schedule Auto-Generate Rules (`Schedule.tsx`)
-
-1. **Doubled subjects**: exactly 1 pair (2 consecutive periods) per day, cycled across days. No `allowSameDay` influence on doubled placement.
-2. **All other subjects** (regular, no-teacher, unassigned): merged into a single fill pool, max 2 appearances per day per subject.
-3. **No `periodsPerWeek`** — removed from `SubjectConfig` type and UI. Per-subject frequency is implicit (max 2/day, fill remaining).
-4. **No Teacher** is a separate checkbox section below the table (not a table column).
-5. `updateSubjectConfig` signature: `(subjectId, subjectName, field, value)` where `field` is `'doubled' | 'allowSameDay' | 'noTeacher'` and `value` is `boolean`.
-
-## Timetable PDF
-
-- Uses `autoTable` for reliable rendering.
-- Header band with school logo, name, date (same as full report).
-- Grid columns: Period (with time), Mon–Fri. Shows subject name + teacher name per cell.
-- Footer with school name + page number.
-
-## Salary Slip
-
-- Salary slip drawing lives in `Attendance.tsx` (`drawSalarySlip` at line ~619), not `App.tsx`.
-- Uses `schoolSettings` for branding colors, bank box color via `salarySlipBankBoxColor` setting.
-- Employee `monthSalary` (Record<string, number>) stores custom salary per month; falls back to `salary` field.
-
-## Settings Persistence
-
-- `schoolSettings` is stored in `localStorage` under key `'schoolSettings'`, synced via `useEffect` in `App.tsx:608`.
-- All PDF visual settings (colors, logo size, fonts, subtitles) are part of `schoolSettings`.
-
-## PDF Form Builder (`PDFFormPage.tsx`)
-
-- **Firebase Storage** used for original PDF templates only (admin upload).
-- Admin upload: pdfjs reads AcroForm fields first → if none found, AI (OpenRouter) reads PDF text to detect fields. PDF stored in Storage.
-- Public form (`PublicFormFiller`): renders fields, on submit saves submission to Firestore, then generates filled PDF client-side via **pdf-lib** (`PDFDocument.load` + `PDFTextField.setText`) and auto-downloads to device. No Storage upload for filled PDF.
-- If original PDF has no AcroForm fields, pdf-lib creates new text fields and places them on the PDF.
-- Admin submissions table: "View" button regenerates filled PDF on-demand from original template + form data (shown in iframe modal). "Download" button does the same but saves to device.
-- `fillOriginalPdf(templatePdfUrl, fields, formData, submitterName)` → returns `Blob`. Used by both public form and admin view/download.
-- `FormField` type: `{ id, label, type, required, options? }`.
-- `FormTemplate` type: `{ id?, autoId, title, description, pdfUrl, fields, createdAt }`.
-- `FormSubmission` type includes `filledPdfUrl?: string` (optional, no longer populated).
-- Public link: `?form=FORM_ID` URL param renders `PublicFormFiller` without nav/sidebar.
-
-## Misc Gotchas
-
-- `tsconfig.json` has `strict: true` but `noUnusedLocals: false, noUnusedParameters: false` — relaxed.
-- `.env` file: optional, for OpenRouter key + model. Not required for building.
-- Holiday type `'sunday'` is auto-generated (every Sunday); `'manual'` is user-created.
-- `clsx` and `tailwind-merge` both available for conditional class merging.
-- All entities use `autoId` (string) as the display id, not the Firestore `id`.
+- **Sequential global autoIds**, set on save, never in form state: `getNextSequentialId(collection)` → format `STU-001`, `FEE-001`, `EXP-001`, `EMP-001` with `padStart(3,'0')`. `generateAutoId()` is only a temporary placeholder for form defaults until save (see `handleSaveStudent`/`handleSaveFee` in `App.tsx`).
+- **Deactivated students** are identified by `autoId` starting with `D-` (e.g. `D-STU-001`); `isDeactivatedStudent()` (`App.tsx:699`) excludes them from all registers, lists, and PDFs. Keep prefixing the id `D-` on deactivation and re-adding plain `STU-` on reactivation.
+- UI theme is set in `main.tsx` from `localStorage('uiTheme')`. Under `data-theme="wrb"` a whole set of Tailwind classes (`bg-[#1E1E1E]`, `text-white`, `from-cyan-500`, etc.) is **re-mapped to a light theme in `src/index.css`**. When restyling, keep the dark palette consistent with these overrides or the light theme breaks.
+- PDFs are generated client-side with jspdf + jspdf-autotable; reuse the `PDFHelper.ts` helpers instead of hand-rolling headers/footers.
+- Mixing conventions: `App.tsx`/`firebase.ts` use pre-React-19 no-callback style with deeply nested JSX; match existing style rather than introducing new abstractions. Some form shapes use `as any` on `useState` — acceptable in this codebase.
