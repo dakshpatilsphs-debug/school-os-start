@@ -8,9 +8,9 @@ This documents the **SMS** tab added to the School Management Tracking System: h
 
 | Setting | Value |
 |---------|-------|
-| Gateway host:port | `http://192.168.31.22:8082` |
+| Gateway host:port | `http://10.205.244.156:8082` |
 | Protocol | Traccar-style HTTP SMS (`sms.http.url` / `sms.http.authorization` pattern) |
-| Dev proxy (Vite) | `/smsgw` → `http://192.168.31.22:8082` (see `vite.config.ts`) |
+| Dev proxy (Vite) | `/smsgw` → `http://10.205.244.156:8082` (see `vite.config.ts`) |
 | App fetch URL | `/smsgw` (relative — avoids CORS in `npm run dev`; also works if `dist/index.html` is served *from* the gateway) |
 
 The gateway must be reachable from the machine running the app. If hosted elsewhere, either run the app behind the Vite dev proxy or enable CORS on the gateway.
@@ -34,7 +34,7 @@ Where it lives: `SMS_TOKEN` constant in `src/SmsSection.tsx`.
 ## 3. Request format
 
 ```
-POST /smsgw        (dev)  →  http://192.168.31.22:8082   (gateway)
+POST /smsgw        (dev)  →  http://10.205.244.156:8082   (gateway)
 Headers:
   Content-Type: application/json
   Authorization: 681f0d5d-024e-452d-bbbc-6595b974c478

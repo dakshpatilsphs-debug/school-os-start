@@ -129,7 +129,7 @@
 A new **SMS** tab was added to the app shell (nav entry with `FiSend`, `Tab` union extended with `'sms'`, page-title case added, rendered via `<SmsSection students={students} fees={fees} showNotification={showNotification} />`).
 
 ### 7.1 Gateway contract (Traccar-style HTTP SMS)
-- **Endpoint:** `http://192.168.31.22:8082` (exposed in dev through the Vite proxy `/smsgw` → target, `changeOrigin: true`, `rewrite` strips the `/smsgw` prefix). Relative path keeps CORS away in `npm run dev` and also works if the built file is later served *from* the gateway (same-origin).
+- **Endpoint:** `http://10.205.244.156:8082` (exposed in dev through the Vite proxy `/smsgw` → target, `changeOrigin: true`, `rewrite` strips the `/smsgw` prefix). Relative path keeps CORS away in `npm run dev` and also works if the built file is later served *from* the gateway (same-origin).
 - **Auth:** `Authorization` header carrying the gateway token (`681f0d5d-024e-452d-bbbc-6595b974c478`). Initially sent as `Bearer <token>` → returned **401**, switched to the **raw token** (`Authorization: <token>`, no `Bearer` prefix) which matches Traccar's `sms.http.authorization` behavior.
 - **Body:** `POST` JSON `{ "to": "<phone>", "message": "<text>" }` (Traccar template shape — `to`/`message`, not `phone`/`message`).
 - **Encoding:** sent as UTF-8 JSON, so Devanagari (Hindi/Marathi) transmits correctly. Delivery of Unicode depends on the SMS provider supporting Unicode.
@@ -185,7 +185,7 @@ Low-risk, theme-agnostic additions layered on top of the existing `data-theme` t
 ---
 
 ## 9. Build / Dev config (`vite.config.ts`)
-- Added `server.proxy['/smsgw']` → `http://192.168.31.22:8082` (`changeOrigin`, `rewrite` strips `/smsgw`) so the browser SPA can reach the SMS gateway without CORS in `npm run dev`.
+- Added `server.proxy['/smsgw']` → `http://10.205.244.156:8082` (`changeOrigin`, `rewrite` strips `/smsgw`) so the browser SPA can reach the SMS gateway without CORS in `npm run dev`.
 - The single-file production build has no proxy; for production either serve `dist/index.html` from the gateway (same-origin) or enable CORS on the gateway.
 
 ---
@@ -225,7 +225,7 @@ npx tsc --noEmit
 
 # Dev server (needs PocketBase running at 127.0.0.1:8090)
 npm run dev
-# SMS uses the /smsgw proxy → http://192.168.31.22:8082 (restart dev after config change)
+# SMS uses the /smsgw proxy → http://10.205.244.156:8082 (restart dev after config change)
 
 # Build (emits single-file dist/index.html ~2.4 MB)
 npm run build

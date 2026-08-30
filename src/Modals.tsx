@@ -188,15 +188,15 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <h3 className="text-base font-bold text-cyan-400">SMS Gateway</h3>
         <p className="text-xs text-gray-500">Traccar-style HTTP SMS. Token is sent as raw <code className="bg-gray-800 px-1 rounded">Authorization</code> header. Change here and Save.</p>
         <div className="grid grid-cols-1 gap-3">
-          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Token (Authorization)</label><input value={p.schoolSettings.smsToken || ''} onChange={e => { const v = e.target.value; p.setSchoolSettings({ ...p.schoolSettings, smsToken: v }); try { localStorage.setItem('smsToken', v); } catch {} }} placeholder="681f0d5d-024e-452d-bbbc-6595b974c478" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Stored in localStorage <code>smsToken</code> and schoolSettings. Raw token, no Bearer prefix.</p></div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Endpoint</label><input value={p.schoolSettings.smsEndpoint || '/smsgw'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, smsEndpoint: e.target.value })} placeholder="/smsgw or http://192.168.31.22:8082" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Dev proxy: <code>/smsgw → http://192.168.31.22:8082</code> (vite.config.ts). Use relative <code>/smsgw</code> to avoid CORS.</p></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Token (Authorization)</label><input value={p.schoolSettings.smsToken || ''} onChange={e => { const v = e.target.value; p.setSchoolSettings({ ...p.schoolSettings, smsToken: v }); try { localStorage.setItem('smsToken', v); } catch { } }} placeholder="681f0d5d-024e-452d-bbbc-6595b974c478" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Stored in localStorage <code>smsToken</code> and schoolSettings. Raw token, no Bearer prefix.</p></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Endpoint</label><input value={p.schoolSettings.smsEndpoint || '/smsgw'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, smsEndpoint: e.target.value })} placeholder="/smsgw or http://10.205.244.156:8082" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Dev proxy: <code>/smsgw → http://10.205.244.156:8082</code> (vite.config.ts). Use relative <code>/smsgw</code> to avoid CORS.</p></div>
         </div>
       </div>
 
       {/* ===== PDF Editor Section ===== */}
       <div className="border-t border-gray-700 pt-4 mt-2 space-y-4">
         <h3 className="text-base font-bold text-purple-400">PDF Report Editor</h3>
-        
+
         {/* Text Editing */}
         <div className="space-y-2">
           <p className="text-xs font-semibold text-gray-400 uppercase">Text Content</p>
@@ -569,7 +569,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
                     <div key={di} className="flex gap-1 items-center">
                       <span className="text-gray-500 text-xs shrink-0">•</span>
                       <input value={desc} onChange={e => updateDesc(i, di, e.target.value)} className="flex-1 p-1.5 bg-gray-900 rounded-lg border border-gray-700 text-white text-xs" placeholder={`Description ${di + 1}`} />
-                       <button onClick={() => removeDesc(i, di)} aria-label="Remove description" title="Remove description" className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
+                      <button onClick={() => removeDesc(i, di)} aria-label="Remove description" title="Remove description" className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
                     </div>
                   ))}
                   <button onClick={() => addDesc(i)} className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"><FiPlus size={12} /> Add description</button>

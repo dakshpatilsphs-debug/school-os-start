@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { FiSend, FiMessageSquare, FiUsers, FiCheck, FiX, FiPhone, FiMail, FiZap } from 'react-icons/fi';
 
-const DEFAULT_SMS_TOKEN = '681f0d5d-024e-452d-bbbc-6595b974c478';
+const DEFAULT_SMS_TOKEN = 'fe0c119c-44aa-4634-a2cb-3f1e0e987f8f';
 const DEFAULT_SMS_ENDPOINT = '/smsgw';
 
 export interface SmsSectionProps {
