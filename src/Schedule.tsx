@@ -41,6 +41,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const [teacherSubjects, setTeacherSubjects] = useState<TeacherSubject[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Subjects form
   const [showSubjectForm, setShowSubjectForm] = useState(false);
@@ -83,6 +84,13 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     localStorage.setItem(SCHEDULE_KEY, JSON.stringify({ viewMode, selectedClass, numPeriods, periodSlots, breakAfterPeriod, maxDoubledPerDay, scheduleRules }));
   }, [viewMode, selectedClass, numPeriods, periodSlots, breakAfterPeriod, maxDoubledPerDay, scheduleRules]);
 
+  useEffect(() => {
+    if (!showRulesModal) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowRulesModal(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showRulesModal]);
+
   const activeEmployees = employees.filter(e => e.status === 'ACTIVE');
   const classes = [...new Set(students.map(s => s.class).filter(Boolean))].sort();
   const allTeacherSubjects = activeEmployees
@@ -91,19 +99,27 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     ? activeEmployees.filter(e => e.role?.toLowerCase().includes('teacher') || e.department?.toLowerCase().includes('teacher'))
     : activeEmployees;
 
-  useEffect(() => { loadSubjects(); loadTeacherSubjects(); loadTimetable(); loadSubjectConfigs(); }, []);
+  const reloadAll = useCallback(() => {
+    setLoadError(null);
+    loadSubjects();
+    loadTeacherSubjects();
+    loadTimetable();
+    loadSubjectConfigs();
+  }, []);
+
+  useEffect(() => { reloadAll(); }, [reloadAll]);
 
   const loadSubjects = async () => {
-    try { const d = await getSubjects(); setSubjects(d as Subject[]); } catch {}
+    try { const d = await getSubjects(); setSubjects(d as Subject[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
   const loadTeacherSubjects = async () => {
-    try { const d = await getTeacherSubjects(); setTeacherSubjects(d as TeacherSubject[]); } catch {}
+    try { const d = await getTeacherSubjects(); setTeacherSubjects(d as TeacherSubject[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
   const loadTimetable = async () => {
-    try { const d = await getTimetableEntries(); setTimetable(d as TimetableEntry[]); } catch {}
+    try { const d = await getTimetableEntries(); setTimetable(d as TimetableEntry[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
   const loadSubjectConfigs = async () => {
-    try { const d = await getSubjectConfigs(); setSubjectConfigs(d as SubjectConfig[]); } catch {}
+    try { const d = await getSubjectConfigs(); setSubjectConfigs(d as SubjectConfig[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
 
   // ===== Subjects CRUD =====
@@ -360,6 +376,11 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
       if (!jsonMatch) throw new Error('Invalid AI response');
       const fixes = JSON.parse(jsonMatch[0]) as Array<{ class: string; day: string; period: number; newSubjectId: string; newSubjectName: string; newTeacherId: string; newTeacherName: string }>;
 
+      if (!confirm(`Apply ${fixes.length} changes?`)) {
+        setLoading(false);
+        return;
+      }
+
       for (const fix of fixes) {
         const existing = timetable.find(e => e.class === fix.class && e.day === fix.day && e.period === fix.period);
         if (existing?.id) await deleteTimetableEntry(existing.id);
@@ -375,11 +396,16 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
       const remaining = getAllClashes();
       setClashReport(remaining);
       showNotification(`AI applied ${fixes.length} change(s) — ${remaining.length} clash(es) remaining`, remaining.length === 0 ? 'success' : 'error');
-    } catch { showNotification('AI fix failed', 'error'); }
+    } catch (err) { showNotification((err as any)?.message || 'Failed to apply AI fixes', 'error'); }
     setLoading(false);
   };
 
   const updatePeriodSlots = (n: number) => {
+    const customized = periodSlots.some((s, i) => {
+      const d = DEFAULT_PERIODS[i];
+      return d ? (s.startTime !== d.startTime || s.endTime !== d.endTime) : false;
+    });
+    if (customized && !confirm('Changing periods/day will reset your customized period times. Continue?')) return;
     setNumPeriods(n);
     setPeriodSlots(DEFAULT_PERIODS.slice(0, n));
   };
@@ -536,6 +562,11 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
         }
       }
 
+      const existingCount = timetable.filter(e => e.class === selectedClass).length;
+      if (existingCount > 0 && !confirm(`This will delete ${existingCount} existing timetable entries for this class. Continue?`)) {
+        setLoading(false);
+        return;
+      }
       await deleteTimetableForClass(selectedClass);
       await saveTimetableEntries(entries);
       await loadTimetable();
@@ -581,9 +612,9 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
   const handleCellClear = async () => {
     if (!selectedCell || !selectedClass) return;
     const existing = getEntry(selectedClass, selectedCell.day, selectedCell.period);
-    if (existing?.id) {
-      try { await deleteTimetableEntry(existing.id); await loadTimetable(); } catch {}
-    }
+      if (existing?.id) {
+        try { await deleteTimetableEntry(existing.id); await loadTimetable(); } catch (e) { showNotification('Failed to clear cell: ' + ((e as any)?.message || e), 'error'); }
+      }
     setSelectedCell(null);
   };
 
@@ -710,8 +741,16 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="bg-red-950/50 border border-red-500/30 rounded-xl p-4 flex items-center justify-between gap-4">
+          <p className="text-sm font-semibold text-red-400">Could not reach database — Is the backend running?</p>
+          <button onClick={reloadAll} className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-400 text-white rounded-lg text-sm font-semibold transition">
+            <FiRefreshCw size={14} /> Retry
+          </button>
+        </div>
+      )}
       {/* Sub-tab Navigation */}
-      <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-2 flex gap-1">
+      <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-2 flex flex-wrap gap-1">
         {subTabs.map(t => (
           <button
             key={t.id}
@@ -1086,14 +1125,14 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
                 </div>
 
                 <div className="flex flex-wrap gap-2 mb-6">
-                  <button onClick={clearTimetable} className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                  <button onClick={clearTimetable} title="Clear timetable" aria-label="Clear timetable" className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
                     <FiTrash2 size={16} />
                   </button>
                   {selectedClass && <>
                     <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
                       <FiDownload size={16} /> PDF
                     </button>
-                    <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                    <button onClick={handlePrint} title="Print timetable" aria-label="Print timetable" className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
                       <FiPrinter size={16} /> Print
                     </button>
                   </>}
@@ -1169,8 +1208,12 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
                                 return (
                                   <td
                                     key={day}
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label={`${entry?.subjectId ? entry.subjectName + ' for ' + day + ' period ' + p : 'Empty slot ' + day + ' period ' + p}${isConflict ? ', teacher conflict' : ''}`}
                                     onClick={() => handleCellClick(day, p)}
-                                    className={`p-2 border border-gray-800 cursor-pointer transition-all relative ${isSelected ? 'ring-2 ring-cyan-500' : ''} ${isEmpty ? 'hover:bg-gray-800/50' : 'hover:bg-gray-800/30'}`}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCellClick(day, p); } }}
+                                    className={`p-2 border border-gray-800 cursor-pointer transition-all relative focus-visible:ring-2 focus-visible:ring-cyan-500 focus:outline-none ${isSelected ? 'ring-2 ring-cyan-500' : ''} ${isEmpty ? 'hover:bg-gray-800/50' : 'hover:bg-gray-800/30'}`}
                                   >
                                     {isSelected && selectedCell ? (
                                       <div className="space-y-1.5" onClick={e => e.stopPropagation()}>
@@ -1183,8 +1226,8 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
                                           {displayTeachers.map(e => <option key={e.autoId} value={e.autoId}>{e.name}</option>)}
                                         </select>
                                         <div className="flex gap-1">
-                                          <button onClick={handleCellSave} className="flex-1 px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-white rounded text-xs font-semibold"><FiSave size={12} /></button>
-                                          <button onClick={handleCellClear} className="px-2 py-1 bg-red-500 hover:bg-red-400 text-white rounded text-xs font-semibold"><FiX size={12} /></button>
+                                          <button onClick={handleCellSave} title="Save cell" aria-label="Save cell" className="flex-1 px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-white rounded text-xs font-semibold"><FiSave size={12} /></button>
+                                          <button onClick={handleCellClear} title="Clear cell" aria-label="Clear cell" className="px-2 py-1 bg-red-500 hover:bg-red-400 text-white rounded text-xs font-semibold"><FiX size={12} /></button>
                                         </div>
                                       </div>
                                     ) : isEmpty ? (

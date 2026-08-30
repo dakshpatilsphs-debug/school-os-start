@@ -88,6 +88,21 @@ const inputReadonly = "w-full p-2 bg-gray-700 rounded border border-gray-600 tex
 
 export const AppModals: React.FC<ModalProps> = (p) => {
   const [feeStudentSearch, setFeeStudentSearch] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const guardSave = (fn: () => void) => () => {
+    if (saving) return;
+    setSaving(true);
+    try { fn(); } finally { setSaving(false); }
+  };
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') p.onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [p.onClose]);
 
   const toggleSubmittedDocument = (documentName: string) => {
     p.setStudentForm(prev => {
@@ -101,16 +116,16 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
   const renderClassMgmt = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Classes</h3><button onClick={() => p.setShowClassMgmt(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
+      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Classes</h3><button onClick={() => p.setShowClassMgmt(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
       <div className="flex gap-2">
-        <input placeholder="Enter class (e.g., 10A)" value={p.newClassName} onChange={e => p.setNewClassName(e.target.value.toUpperCase())} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase" onKeyPress={e => e.key === 'Enter' && p.handleAddClass()} />
-        <button onClick={p.handleAddClass} className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg"><FiPlus size={18} /></button>
+        <input placeholder="Enter class (e.g., 10A)" value={p.newClassName} onChange={e => p.setNewClassName(e.target.value.toUpperCase())} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase" onKeyDown={e => e.key === 'Enter' && p.handleAddClass()} />
+        <button onClick={p.handleAddClass} aria-label="Add class" title="Add class" className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg"><FiPlus size={18} /></button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto">
         {p.classes.map(c => (
           <div key={c} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
             <span className="font-mono text-cyan-400">{c}</span>
-            <button onClick={() => p.handleRemoveClass(c)} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
+            <button onClick={() => { if (!confirm('Are you sure you want to remove ' + c + '?')) return; p.handleRemoveClass(c); }} aria-label={'Remove ' + c} title={'Remove ' + c} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
           </div>
         ))}
       </div>
@@ -120,17 +135,17 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
   const renderPackageMgmt = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Fee Packages</h3><button onClick={() => p.setShowPackageMgmt(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
+      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Fee Packages</h3><button onClick={() => p.setShowPackageMgmt(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <input placeholder="Package Name" value={p.newPackageName} onChange={e => p.setNewPackageName(e.target.value)} className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" />
-        <input type="number" placeholder="Amount (₹)" value={p.newPackageAmount} onChange={e => p.setNewPackageAmount(e.target.value)} className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" onKeyPress={e => e.key === 'Enter' && p.handleAddPackage()} />
+        <input type="number" min={0} placeholder="Amount (₹)" value={p.newPackageAmount} onChange={e => p.setNewPackageAmount(e.target.value)} className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" onKeyDown={e => e.key === 'Enter' && p.handleAddPackage()} />
         <button onClick={p.handleAddPackage} className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2"><FiPlus size={18} /> Add</button>
       </div>
       <div className="space-y-2 max-h-60 overflow-y-auto">
         {p.packages.map(pkg => (
           <div key={pkg.name} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
             <div><span className="font-semibold text-white">{pkg.name}</span><span className="ml-2 text-yellow-400">₹{pkg.amount.toLocaleString()}</span></div>
-            <button onClick={() => p.handleRemovePackage(pkg.name)} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
+            <button onClick={() => { if (!confirm('Are you sure you want to remove ' + pkg.name + '?')) return; p.handleRemovePackage(pkg.name); }} aria-label={'Remove ' + pkg.name} title={'Remove ' + pkg.name} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
           </div>
         ))}
       </div>
@@ -141,14 +156,14 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
   const renderDocumentMgmt = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Submitted Documents</h3><button onClick={() => p.setShowDocumentMgmt(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
+      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Submitted Documents</h3><button onClick={() => p.setShowDocumentMgmt(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
       <div className="flex gap-2">
         <input placeholder="Enter document name" value={p.newDocumentName} onChange={e => p.setNewDocumentName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); p.handleAddDocumentOption(); } }} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" />
         <button type="button" onClick={p.handleAddDocumentOption} className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2"><FiPlus size={18} /> Add</button>
       </div>
       <div className="space-y-2 max-h-72 overflow-y-auto">
         {p.documentOptions.length === 0 ? <div className="p-6 text-center bg-gray-800 rounded-lg border border-gray-700 text-gray-400">No document options added yet.</div> : p.documentOptions.map(documentName => (
-          <div key={documentName} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700"><span className="text-white font-medium">{documentName}</span><button type="button" onClick={() => p.handleRemoveDocumentOption(documentName)} className="text-red-400 hover:text-red-300" title="Remove document"><FiX size={18} /></button></div>
+          <div key={documentName} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700"><span className="text-white font-medium">{documentName}</span>        <button type="button" onClick={() => p.handleRemoveDocumentOption(documentName)} className="text-red-400 hover:text-red-300" title="Remove document" aria-label={'Remove ' + documentName}><FiX size={18} /></button></div>
         ))}
       </div>
       <button onClick={() => p.setShowDocumentMgmt(false)} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white p-3 rounded-lg font-bold">Done</button>
@@ -161,11 +176,21 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Name</label><input value={p.schoolSettings.schoolName} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, schoolName: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input value={p.schoolSettings.address} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, address: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input value={p.schoolSettings.phone} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, phone: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input value={p.schoolSettings.email} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, email: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input type="tel" inputMode="tel" value={p.schoolSettings.phone} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, phone: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" value={p.schoolSettings.email} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, email: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Primary Color</label><div className="flex gap-2"><input type="color" value={p.schoolSettings.primaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, primaryColor: e.target.value })} className="w-12 h-10 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer" /><input value={p.schoolSettings.primaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, primaryColor: e.target.value })} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-mono" /></div></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Secondary Color</label><div className="flex gap-2"><input type="color" value={p.schoolSettings.secondaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, secondaryColor: e.target.value })} className="w-12 h-10 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer" /><input value={p.schoolSettings.secondaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, secondaryColor: e.target.value })} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-mono" /></div></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Logo</label><div className="flex items-center gap-4">{p.schoolSettings.schoolLogo && <img src={p.schoolSettings.schoolLogo} alt="Logo" className="w-20 h-20 rounded-lg border-2 border-cyan-500" />}<label className="flex-1 flex items-center gap-2 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition"><FiUpload /><span>{p.schoolSettings.schoolLogo ? 'Change Logo' : 'Upload Logo'}</span><input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => p.setSchoolSettings({ ...p.schoolSettings, schoolLogo: ev.target?.result as string }); r.readAsDataURL(f); }} className="hidden" /></label></div></div>
+      </div>
+
+      {/* ===== SMS Gateway Settings ===== */}
+      <div className="border-t border-gray-700 pt-4 mt-2 space-y-4">
+        <h3 className="text-base font-bold text-cyan-400">SMS Gateway</h3>
+        <p className="text-xs text-gray-500">Traccar-style HTTP SMS. Token is sent as raw <code className="bg-gray-800 px-1 rounded">Authorization</code> header. Change here and Save.</p>
+        <div className="grid grid-cols-1 gap-3">
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Token (Authorization)</label><input value={p.schoolSettings.smsToken || ''} onChange={e => { const v = e.target.value; p.setSchoolSettings({ ...p.schoolSettings, smsToken: v }); try { localStorage.setItem('smsToken', v); } catch {} }} placeholder="681f0d5d-024e-452d-bbbc-6595b974c478" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Stored in localStorage <code>smsToken</code> and schoolSettings. Raw token, no Bearer prefix.</p></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Endpoint</label><input value={p.schoolSettings.smsEndpoint || '/smsgw'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, smsEndpoint: e.target.value })} placeholder="/smsgw or http://192.168.31.22:8082" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Dev proxy: <code>/smsgw → http://192.168.31.22:8082</code> (vite.config.ts). Use relative <code>/smsgw</code> to avoid CORS.</p></div>
+        </div>
       </div>
 
       {/* ===== PDF Editor Section ===== */}
@@ -232,7 +257,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       <label className="text-xs text-cyan-400">Upload Bill (Image)</label>
       <div className="flex gap-2">
         <label className="flex-1 flex items-center gap-2 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition"><FiUpload /><span>{p.billFile?.name || 'Choose File'}</span><input type="file" accept="image/*" onChange={p.handleBillUpload} className="hidden" disabled={p.uploading} /></label>
-        {billUrl && <button onClick={() => p.previewBill(billUrl)} className="px-4 py-3 bg-cyan-600 rounded-lg hover:bg-cyan-700"><FiEye /></button>}
+        {billUrl && <button onClick={() => p.previewBill(billUrl)} aria-label="Preview bill" title="Preview bill" className="px-4 py-3 bg-cyan-600 rounded-lg hover:bg-cyan-700"><FiEye /></button>}
       </div>
       {p.uploading && <p className="text-sm text-cyan-400">Uploading...</p>}
     </div>
@@ -248,13 +273,13 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         </div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Name <span className="text-yellow-400">(Auto Caps)</span></label><input placeholder="STUDENT NAME" value={p.studentForm.name} onChange={e => p.handleAutoCaps(e, 'name', p.setStudentForm)} className={inputCls + ' uppercase'} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Roll Number <span className="text-gray-500">(synced with ID)</span></label><input value={p.studentForm.rollNumber || 'Auto-generated on save'} readOnly className={inputReadonly} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Class <span className="text-yellow-400">(Auto Caps)</span></label><div className="flex gap-2"><select value={p.studentForm.class} onChange={e => p.handleAutoCaps(e, 'class', p.setStudentForm)} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase"><option value="">-- Select Class --</option>{p.classes.map(c => <option key={c} value={c}>{c}</option>)}</select><button onClick={() => p.setShowClassMgmt(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-700 text-white"><FiSettings size={18} /></button></div></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Class <span className="text-yellow-400">(Auto Caps)</span></label><div className="flex gap-2"><select value={p.studentForm.class} onChange={e => p.handleAutoCaps(e, 'class', p.setStudentForm)} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase"><option value="">-- Select Class --</option>{p.classes.map(c => <option key={c} value={c}>{c}</option>)}</select><button onClick={() => p.setShowClassMgmt(true)} aria-label="Manage classes" title="Manage classes" className="p-3 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-700 text-white"><FiSettings size={18} /></button></div></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Gender</label><select value={p.studentForm.gender} onChange={e => p.handleAutoCaps(e, 'gender', p.setStudentForm)} className={inputCls + ' uppercase'}><option value="MALE">MALE</option><option value="FEMALE">FEMALE</option><option value="OTHER">OTHER</option></select></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Date of Birth</label><input type="date" value={p.studentForm.dateOfBirth} onChange={e => p.setStudentForm({ ...p.studentForm, dateOfBirth: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Admission Date</label><input type="date" value={p.studentForm.admissionDate} onChange={e => p.setStudentForm({ ...p.studentForm, admissionDate: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Name <span className="text-yellow-400">(Auto Caps)</span></label><input placeholder="PARENT NAME" value={p.studentForm.parentName} onChange={e => p.handleAutoCaps(e, 'parentName', p.setStudentForm)} className={inputCls + ' uppercase'} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Phone</label><input placeholder="Parent Phone" value={p.studentForm.parentPhone} onChange={e => p.setStudentForm({ ...p.studentForm, parentPhone: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input placeholder="Email" value={p.studentForm.email} onChange={e => p.setStudentForm({ ...p.studentForm, email: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Phone</label><input type="tel" inputMode="tel" placeholder="Parent Phone" value={p.studentForm.parentPhone} onChange={e => p.setStudentForm({ ...p.studentForm, parentPhone: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" placeholder="Email" value={p.studentForm.email} onChange={e => p.setStudentForm({ ...p.studentForm, email: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Status</label><select value={p.studentForm.status} onChange={e => p.handleAutoCaps(e, 'status', p.setStudentForm)} className={inputCls + ' uppercase'}><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input placeholder="Address" value={p.studentForm.address} onChange={e => p.setStudentForm({ ...p.studentForm, address: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1 col-span-2">
@@ -268,7 +293,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
               {p.packages.map(pkg => <option key={pkg.name} value={pkg.name}>{pkg.name} - ₹{pkg.amount.toLocaleString()}</option>)}
               <option value="Custom">Custom Amount</option>
             </select>
-            <input type="number" placeholder="Amount" value={p.studentForm.feeAmount || ''} onChange={e => {
+            <input type="number" min={0} placeholder="Amount" value={p.studentForm.feeAmount || ''} onChange={e => {
               const val = parseFloat(e.target.value) || 0;
               p.setStudentForm(prev => ({ ...prev, feeAmount: val, package: val > 0 ? 'Custom' : prev.package }));
             }} className="w-40 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-semibold focus:border-cyan-500 focus:outline-none" />
@@ -301,7 +326,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
           )}
         </div>
       </div>
-      <button onClick={p.handleSaveStudent} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Student' : 'Update Student'}</button>
+      <button onClick={guardSave(p.handleSaveStudent)} disabled={saving} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed">{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Student' : 'Update Student')}</button>
     </div>
   );
 
@@ -371,6 +396,8 @@ export const AppModals: React.FC<ModalProps> = (p) => {
             <input type="number" value={(p.feeForm as any).paymentAmount ?? p.feeForm.amount ?? ''} onChange={e => { const payableAmount = Number((p.feeForm as any).payableAmount ?? p.feeForm.amount ?? 0); const paymentAmount = Math.min(Math.max(parseFloat(e.target.value) || 0, 0), payableAmount); p.setFeeForm(prev => ({ ...prev, paymentAmount, amount: paymentAmount, balanceAmount: Math.max(payableAmount - paymentAmount, 0), status: paymentAmount > 0 ? 'paid' : prev.status } as any)); }} className={inputCls} />
           </div>
           <div className="flex-1 space-y-0.5">
+            <label className="text-[11px] text-cyan-400">Installments (max 11)</label>
+            <select value={(p.feeForm as any).installmentMonths || 1} onChange={e => p.setFeeForm({ ...p.feeForm, installmentMonths: parseInt(e.target.value) || 1 } as any)} className={inputCls}><option value={1}>1 Month</option><option value={2}>2 Months</option><option value={3}>3 Months</option><option value={6}>6 Months</option><option value={9}>9 Months</option><option value={11}>11 Months</option></select>
             <label className="text-[11px] text-cyan-400">Fee Type</label>
             <input value={p.feeForm.type} onChange={e => p.setFeeForm({ ...p.feeForm, type: e.target.value })} className={inputCls} />
           </div>
@@ -412,7 +439,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
           <input value={p.feeForm.description} onChange={e => p.setFeeForm({ ...p.feeForm, description: e.target.value })} className={inputCls} />
         </div>
       </div>
-      <button onClick={p.handleSaveFee} disabled={!p.feeForm.studentId} className={`w-full py-2.5 rounded-lg font-bold text-sm ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>{p.modalType === 'add' ? 'Add Fee' : 'Update Fee'}</button>
+      <button onClick={guardSave(p.handleSaveFee)} disabled={saving || !p.feeForm.studentId} className={`w-full py-2.5 rounded-lg font-bold text-sm ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'} disabled:opacity-60 disabled:cursor-not-allowed`}>{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Fee' : 'Update Fee')}</button>
     </div>
   );
 
@@ -432,7 +459,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Description</label><input value={p.expenseForm.description} onChange={e => p.setExpenseForm({ ...p.expenseForm, description: e.target.value })} className={inputCls} /></div>
         {renderBillUpload(p.expenseForm.billUrl)}
       </div>
-      <button onClick={p.handleSaveExpense} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Expense' : 'Update Expense'}</button>
+      <button onClick={guardSave(p.handleSaveExpense)} disabled={saving} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed">{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Expense' : 'Update Expense')}</button>
     </div>
   );
 
@@ -442,10 +469,10 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1"><label className="text-xs text-cyan-400">Auto ID</label><input value={p.employeeForm.autoId} readOnly className={inputReadonly} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Name <span className="text-yellow-400">(Auto Caps)</span></label><input placeholder="EMPLOYEE NAME" value={p.employeeForm.name} onChange={e => p.handleAutoCaps(e, 'name', p.setEmployeeForm)} className={inputCls + ' uppercase'} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Role / Position</label><select value={p.employeeForm.role} onChange={e => p.handleAutoCaps(e, 'role', p.setEmployeeForm)} className={inputCls + ' uppercase'}><option>TEACHER</option><option>PRINCIPAL</option><option>ADMIN STAFF</option><option>ACCOUNTANT</option><option>LIBRARIAN</option><option>PEON</option><option>SECURITY</option><option>DRIVER</option><option>OTHER</option></select></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input placeholder="Phone" value={p.employeeForm.phone} onChange={e => p.setEmployeeForm({ ...p.employeeForm, phone: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input placeholder="Email" value={p.employeeForm.email} onChange={e => p.setEmployeeForm({ ...p.employeeForm, email: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">New Salary (₹)</label><input type="number" value={p.employeeForm.salary || ''} onChange={e => p.setEmployeeForm({ ...p.employeeForm, salary: parseFloat(e.target.value) || 0 })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Old Salary (₹)</label><input type="number" value={(p.employeeForm as any).oldSalary || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), oldSalary: parseFloat(e.target.value) || 0 }))} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input type="tel" inputMode="tel" placeholder="Phone" value={p.employeeForm.phone} onChange={e => p.setEmployeeForm({ ...p.employeeForm, phone: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" placeholder="Email" value={p.employeeForm.email} onChange={e => p.setEmployeeForm({ ...p.employeeForm, email: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">New Salary (₹)</label><input type="number" min={0} value={p.employeeForm.salary || ''} onChange={e => p.setEmployeeForm({ ...p.employeeForm, salary: parseFloat(e.target.value) || 0 })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Old Salary (₹)</label><input type="number" min={0} value={(p.employeeForm as any).oldSalary || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), oldSalary: parseFloat(e.target.value) || 0 }))} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Auto Salary Refresh</label><label className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white cursor-pointer"><input type="checkbox" checked={Boolean((p.employeeForm as any).salaryAutoRefresh)} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), salaryAutoRefresh: e.target.checked }))} className="w-4 h-4 accent-cyan-500" /><span className="text-sm font-semibold">Enable monthly refresh</span></label></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Salary Refresh Day</label><input type="number" min={1} max={28} value={(p.employeeForm as any).salaryRefreshDay || 1} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), salaryRefreshDay: Math.min(Math.max(parseInt(e.target.value) || 1, 1), 28) }))} className={inputCls} /><p className="text-xs text-gray-500">Creates salary expense every month on/after this day.</p></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Join Date</label><input type="date" value={p.employeeForm.joinDate} onChange={e => p.setEmployeeForm({ ...p.employeeForm, joinDate: e.target.value })} className={inputCls} /></div>
@@ -460,7 +487,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input placeholder="Address" value={p.employeeForm.address} onChange={e => p.setEmployeeForm({ ...p.employeeForm, address: e.target.value })} className={inputCls} /></div>
 
       </div>
-      <button onClick={p.handleSaveEmployee} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Employee' : 'Update Employee'}</button>
+      <button onClick={guardSave(p.handleSaveEmployee)} disabled={saving} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed">{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Employee' : 'Update Employee')}</button>
     </div>
   );
 
@@ -519,7 +546,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-indigo-400 bg-clip-text text-transparent">Offer Letter Settings</h2>
-          <button onClick={() => p.setShowOfferLetterSettings(false)} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={24} /></button>
+          <button onClick={() => p.setShowOfferLetterSettings(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={24} /></button>
         </div>
         <div className="space-y-4">
           <div className="space-y-1"><label className="text-xs text-cyan-400">Offer Title</label><input value={p.schoolSettings.offerTitle || 'Offer Letter'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerTitle: e.target.value })} className={inputCls} /></div>
@@ -542,12 +569,12 @@ export const AppModals: React.FC<ModalProps> = (p) => {
                     <div key={di} className="flex gap-1 items-center">
                       <span className="text-gray-500 text-xs shrink-0">•</span>
                       <input value={desc} onChange={e => updateDesc(i, di, e.target.value)} className="flex-1 p-1.5 bg-gray-900 rounded-lg border border-gray-700 text-white text-xs" placeholder={`Description ${di + 1}`} />
-                      <button onClick={() => removeDesc(i, di)} className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
+                       <button onClick={() => removeDesc(i, di)} aria-label="Remove description" title="Remove description" className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
                     </div>
                   ))}
                   <button onClick={() => addDesc(i)} className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"><FiPlus size={12} /> Add description</button>
                 </div>
-                <button onClick={() => removePoint(i)} className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded mt-1"><FiX size={16} /></button>
+                <button onClick={() => removePoint(i)} aria-label="Remove point" title="Remove point" className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded mt-1"><FiX size={16} /></button>
               </div>
             ))}
           </div>
@@ -582,11 +609,11 @@ export const AppModals: React.FC<ModalProps> = (p) => {
   const isFeeForm = p.activeTab === 'fees' || p.forceFeeForm;
 
   return (
-    <div className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${isFeeForm ? 'p-0' : 'p-4'}`}>
-      <div className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${isFeeForm ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
+    <div onClick={p.onClose} className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${isFeeForm ? 'p-0' : 'p-4'}`}>
+      <div onClick={e => e.stopPropagation()} className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${isFeeForm ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
         <div className={`flex justify-between items-center border-b border-gray-800 ${isFeeForm ? 'mb-3 pb-2' : 'mb-6 pb-4'}`}>
           <h3 className={`font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent ${isFeeForm ? 'text-lg' : 'text-2xl'}`}>{p.modalTitle}</h3>
-          <button onClick={p.onClose} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={isFeeForm ? 20 : 28} /></button>
+          <button onClick={p.onClose} aria-label="Close" title="Close" className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={isFeeForm ? 20 : 28} /></button>
         </div>
         {renderContent()}
       </div>

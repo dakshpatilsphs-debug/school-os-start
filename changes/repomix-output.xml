@@ -59,17 +59,256 @@ src/
   vite-env.d.ts
 .env.example
 .gitignore
+AGENTS.md
 index.html
 package.json
 README.md
 Student_Register_2026-08-05 (1).md
 STUDENT-ADD-UPDATE.md
 tsconfig.json
+UI_UX_CHANGES.md
 vite.config.ts
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="UI_UX_CHANGES.md">
+# UI/UX Changes — School Management Tracking System
+
+**Date:** 2026-08-28 (updated through SMS + Theme pass)
+**Scope:** Behavioral / accessibility / feedback fixes **plus** a new SMS communication module, Hindi/Marathi (Unicode) support, an in-page AI message writer, and a global theme/color/alignment modernization pass.
+
+---
+
+## 1. Modals (`src/Modals.tsx`) — Global modal shell + 4 forms
+
+| Issue | Fix | Impact |
+|-------|-----|--------|
+| Escape key did nothing | `useEffect` keydown listener on `p.onClose` | Keyboard dismiss works everywhere |
+| Backdrop click did nothing | Overlay `onClick={p.onClose}`, inner `stopPropagation` | Click outside to close |
+| Double-click Save created duplicate records | Local `saving` state; `guardSave(fn)` wraps handlers; buttons show "Saving…" & disable while in flight | No accidental duplicates |
+| Class / Package removal → no confirm | `confirm()` with descriptive message before calling prop handlers | Prevents accidental deletes |
+| Deprecated `onKeyPress` on Add inputs | Replaced with `onKeyDown` | React 18+ compatibility |
+| Number inputs (amount, salary, oldSalary, package amount) missing `min` | Added `min={0}` | Native spinner/type protection |
+| Phone/Email inputs were plain text | `type="tel" inputMode="tel"` / `type="email"` | Mobile keyboard hints, validation |
+| Icon-only buttons (×, trash, save, edit, eye, settings) lacked accessible names | `aria-label` + `title` on every icon button | Screen reader announcements |
+| Fee form forced full-screen on desktop | Unchanged (structure preserved) — only backdrop/Escape/label fixes applied | — |
+
+---
+
+## 2. App.tsx — Main monolith (tabs, tables, forms, CorrectionSection)
+
+### 2.1 Student Add/Edit Form
+| Issue | Fix |
+|-------|-----|
+| Required fields (Name, Class, Parent, Phone, Fee) never validated — empty student saved | Early-return validation with targeted error toasts |
+| `handleSaveStudent` called `showNotification('Student saved')` even on PocketBase error | `try/catch` with `showPocketBaseError` — real error surfaced |
+
+### 2.2 Fee Form
+| Issue | Fix |
+|-------|-----|
+| Selecting a student popped a success toast ("Selected: …") | Removed toast — selection is not an action |
+
+### 2.3 Expense Form
+| Issue | Fix |
+|-------|-----|
+| No client validation — 0 amount, blank date, blank paid-to allowed | Required checks for Category, Amount > 0, Date, Paid-To with error toasts |
+| Selecting employee in expense form showed success toast | Removed toast |
+
+### 2.4 Table Empty States (was: blank `<tbody>` indistinguishable from PB down)
+| Table | Empty row text |
+|-------|----------------|
+| Student List | "No students found. If you expect data, make sure PocketBase is running, then click Refresh." / "No students match your search or filter." |
+| Fees | Same pattern (distinguishes 0 fees in DB vs filter mismatch) |
+| Expenses | Same pattern |
+| Equipments | Same pattern |
+
+### 2.5 Equipment "Check Assigned To" dropdown
+| Issue | Fix |
+|-------|-----|
+| Listed deactivated students (`D-` prefix) | Filter `students.filter(s => !isDeactivatedStudent(s))` |
+
+### 2.6 Icon buttons in tables
+| Button | Added |
+|--------|-------|
+| Pay Fee, ID Card, Edit, Delete (students) | `title` |
+| Edit, Delete (fees, expenses, equipments) | `title` |
+
+### 2.7 CorrectionSection — Move/Edit bug (functional UX)
+| Bug | Root cause | Fix |
+|-----|------------|-----|
+| Arrow buttons swapped wrong rows when filter active | Used visible index `i` on full `items` array | Compute `ri = items.indexOf(item)` per row; use `ri` for move, updateField, drag, numbering |
+| Duplicate autoId check used wrong index | `xi !== i` | `xi !== ri` |
+| `items.indexOf(item)` called 4× per row (O(n²)) | — | Single `ri` lookup |
+
+---
+
+## 3. Schedule.tsx (`src/Schedule.tsx`)
+
+| Area | Issue | Fix |
+|------|-------|-----|
+| Timetable cells | Mouse-only; no keyboard, no ARIA | `tabIndex={0}`, `role="button"`, `onKeyDown` (Enter/Space), `focus-visible:ring`, `aria-label` |
+| Auto Generate | Wiped existing timetable silently | `confirm()` with entry count before `deleteTimetableForClass` |
+| AI Fix All | Applied AI changes without preview/confirm | After parsing fixes, `confirm(\`Apply ${fixes.length} changes?\`)`; catch shows real error message |
+| Change periods/day | Reset custom period times silently | Detect customization; `confirm('…will reset your customized period times.')` |
+| Cell Clear | `catch {}` swallowed errors → looked like success | `catch { showNotification('Failed to clear cell','error') }` |
+| DB load failures | Silent `catch {}` → fake empty states | `loadError` state + banner with "Could not reach database — Is PocketBase running?" + Retry button |
+| Sub-tab bar | Overflowed on narrow screens | `flex-wrap` |
+| Rules modal | No Escape close | `useEffect` keydown listener |
+| Trash / Save / Clear icons | No labels | `title` / `aria-label` |
+| `window.print()` | Bare call, no feedback | Unchanged (structure) — only accessible button label added |
+
+---
+
+## 4. Attendance.tsx (`src/Attendance.tsx`)
+
+| Area | Issue | Fix |
+|------|-------|-----|
+| Monthly grid import progress | `total: 1`, `current` per cell → >100% bar | Accumulate `totalCells`; `setAttImport({ total: Math.max(totalCells, 1) })` |
+| Import errors | Only in console; toast said "X failed" with no details | Toast includes first 3 errors + `+N more` count |
+| "Old" salary toggle | `setSalaryType('old'); setSelectedMonthlyEmployeeId('')` — kicked user back to selector | Only `setSalaryType('old'); setEditMonthSalary(false)` — keeps employee visible |
+| CL quota Save | Invalid input (NaN, negative) silently did nothing | Validation with error toast: "CL quota must be a number between 0 and 365" |
+| Holiday delete / Direct-pay close | Icon-only, no label | `title` + `aria-label` |
+
+---
+
+## 5. ImportSection.tsx (`src/ImportSection.tsx`)
+
+| Area | Issue | Fix |
+|------|-------|-----|
+| Dropzone | Looked draggable but was `<label>` only — drop navigated browser | `onDragOver`/`onDragLeave`/`onDrop` handlers; visual `dragging` state |
+| Import confirmation | None — attendance/holidays/timetable upsert overwrite silently | `confirm(\`Import N rows? Rows with same key will OVERWRITE.\`)` for upsert types |
+| Reference data load | `getStudents/Employees/Subjects` caught → `[]`; lookups produced blank IDs | After `loadRef()`, warn if all empty and type isn't students/employees |
+| Import errors | Only in console | Toast shows first 3 errors + count |
+| Clear file during import | Reset state while loop still running → confusing UI | `disabled={importing}` + early return |
+| Download sample | Enabled but no-op before type chosen | `disabled={!type}` + `title` hint |
+| Truncated preview cells | No way to see full value | `title={fullValue}` on both mapping sample & import preview |
+
+---
+
+## 6. AIAssistant.tsx (`src/components/AIAssistant.tsx`)
+
+| Issue | Fix |
+|-------|-----|
+| No streaming, no stop — slow request locked composer | `AbortController`; send button becomes **Stop** (FiSquare) while `loading`; `signal` passed to fetch; abort surfaces "Generation stopped." |
+| Enter key sent duplicate request while loading | `handleKeyDown` guards `if (!loading) sendMessage()` |
+| PDF/Video attachments accepted but **silently dropped** (only images sent) | On attach: `setError('Note: only images are analyzed — PDF/video kept locally but not sent.')` |
+| `dangerouslySetInnerHTML` with raw model markdown → XSS vector | Escape `& < >` before markdown regex replacements |
+| Floating panel | Fixed `w-96` (384px) — overflowed on phones | `w-[min(24rem,calc(100vw-3rem))]` responsive width |
+| Icon buttons (close, attach, remove, send, FAB) | No accessible names | `aria-label` on all; `title` on paperclip |
+
+---
+
+## 7. SMS Module (`src/SmsSection.tsx` — NEW) + `src/App.tsx` wiring
+
+A new **SMS** tab was added to the app shell (nav entry with `FiSend`, `Tab` union extended with `'sms'`, page-title case added, rendered via `<SmsSection students={students} fees={fees} showNotification={showNotification} />`).
+
+### 7.1 Gateway contract (Traccar-style HTTP SMS)
+- **Endpoint:** `http://192.168.31.22:8082` (exposed in dev through the Vite proxy `/smsgw` → target, `changeOrigin: true`, `rewrite` strips the `/smsgw` prefix). Relative path keeps CORS away in `npm run dev` and also works if the built file is later served *from* the gateway (same-origin).
+- **Auth:** `Authorization` header carrying the gateway token (`681f0d5d-024e-452d-bbbc-6595b974c478`). Initially sent as `Bearer <token>` → returned **401**, switched to the **raw token** (`Authorization: <token>`, no `Bearer` prefix) which matches Traccar's `sms.http.authorization` behavior.
+- **Body:** `POST` JSON `{ "to": "<phone>", "message": "<text>" }` (Traccar template shape — `to`/`message`, not `phone`/`message`).
+- **Encoding:** sent as UTF-8 JSON, so Devanagari (Hindi/Marathi) transmits correctly. Delivery of Unicode depends on the SMS provider supporting Unicode.
+
+### 7.2 Single-number mode
+| Detail | Behavior |
+|--------|----------|
+| Inputs | `type="tel" inputMode="tel"` phone field + message `<textarea>` with live character count |
+| Validation | Blocks send if phone or message empty → error toast |
+| Send | `POST` to gateway; on success shows green "SMS sent successfully.", on failure shows red `Failed: <status> <response body>` so the real cause is visible |
+| States | Send button shows "Sending…" and disables while in flight |
+
+### 7.3 Class-wise bulk mode (automated, with criteria)
+| Detail | Behavior |
+|--------|----------|
+| Class picker | Select from distinct student classes (deactivated `D-` students excluded) |
+| Recipient filter | **"Students with fees not paid"** (any fee where `status !== 'paid'` OR `balanceAmount > 0`) or **"All students in class"** |
+| Phone source | Each recipient's **Parent Phone** (`parentPhone`) as entered in *Student Add* |
+| Template | Editable message with placeholders `{name}`, `{parentName}`, `{class}` replaced per student |
+| Recipient preview | Live list (name / parent / phone) of who will receive, with count |
+| Send loop | One `POST` per recipient with a **10-second gap** between messages (`await setTimeout(10_000)`); progress bar + "Sent X of N"; disabled while sending |
+| Confirm | `confirm()` with recipient count + gap warning before firing |
+| Result | Per-run summary `Sent: n · Failed: m` plus a scrollable list of the first 10 failures with their error text |
+
+### 7.4 AI message writer (multi-language)
+- A **"Write with AI"** button sits under both the single message box and the bulk template box.
+- Opens an inline panel: a free-text "what should the SMS say?" field + a **Language** select (**English / Hindi (हिंदी) / Marathi (मराठी)**).
+- Calls OpenRouter (reuses `VITE_OPENROUTER_KEY`, default model `google/gemma-4-26b-a4b-it:free`) with a system prompt that returns a **≤160-char** polite message in the chosen language, preserving the `{name}`/`{parentName}`/`{class}` placeholders.
+- "Use this text" inserts the generated copy into the active field (single message or bulk template).
+- If the key is missing it shows `AI key not set (VITE_OPENROUTER_KEY)`; API/HTTP errors are surfaced inline.
+- UI note reminds the user that Unicode (Devanagari) delivery depends on the gateway/provider.
+
+### 7.5 Accessibility
+- Mode toggle uses `aria-pressed`; all inputs have `aria-label`; the AI panel toggle uses `aria-expanded`; focus rings provided by the global polish (Section 9).
+
+---
+
+## 8. Theme / Color / Alignment Modernization (`src/index.css` — NEW global polish)
+
+Low-risk, theme-agnostic additions layered on top of the existing `data-theme` token maps (`wrb`, `neu`, `blackblue`). Preserves existing `className` strings, gradients and component structure; only raises consistency.
+
+| Area | Change | Impact |
+|------|--------|--------|
+| Smooth motion | Unified `transition` on `button, a, input, select, textarea, .btnCorrection, [role="button"]` | Consistent, calmer interactions everywhere |
+| Keyboard focus | `focus-visible` ring (2px, `outline-offset`, rounded) for **all** themes — was missing on the default `wrb` theme; `neu`/`blackblue` use their `--accent` | Visible keyboard navigation in every theme |
+| Rendering | `body` antialiasing + `text-rendering: optimizeLegibility`; `html { scroll-behavior: smooth }` | Crisper text, smoother scrolling |
+| Cards (wrb) | `.bg-[#1E1E1E]` → `border-radius: 1rem`; `.rounded-xl/.rounded-2xl` get a soft layered shadow | Softer, more uniform elevation |
+| Cards (neu/blackblue) | `.bg-[#1E1E1E]` → `border-radius: 1rem` | Consistent corner rhythm |
+| Tables | `border-collapse: separate`, left-aligned `th` with `font-weight: 600`, `vertical-align: middle` | Aligned, readable grids |
+| Form controls | `input/select/textarea` → `border-radius: 0.5rem` | Inputs/buttons line up |
+| Placeholders | `::placeholder { opacity: 0.7 }` | Better default contrast |
+
+---
+
+## 9. Build / Dev config (`vite.config.ts`)
+- Added `server.proxy['/smsgw']` → `http://192.168.31.22:8082` (`changeOrigin`, `rewrite` strips `/smsgw`) so the browser SPA can reach the SMS gateway without CORS in `npm run dev`.
+- The single-file production build has no proxy; for production either serve `dist/index.html` from the gateway (same-origin) or enable CORS on the gateway.
+
+---
+
+## 10. Global / Cross-cutting
+
+| Area | Change |
+|------|--------|
+| TypeScript | `npx tsc --noEmit` — **passes clean** (no new type errors introduced) |
+| Theme / Layout | **Modernized** via `src/index.css` global polish (Section 8). Component `className`/gradient strings preserved; consistency/contrast/alignment improved |
+| SMS auth | Traccar-style `Authorization: <token>` (raw), body `{to,message}`, UTF-8 Unicode for Hindi/Marathi |
+| PocketBase error swallowing | Not fixed (architectural in `src/pocketbase.ts:getFullList`) — UI-level banners added where feasible (Schedule, Import, empty tables) |
+
+---
+
+## Files Modified
+
+```
+src/Modals.tsx
+src/App.tsx
+src/Schedule.tsx
+src/Attendance.tsx
+src/ImportSection.tsx
+src/components/AIAssistant.tsx
+src/SmsSection.tsx          (NEW — SMS tab: single + class-wise bulk, AI writer)
+src/index.css               (NEW global theme/color/alignment polish)
+vite.config.ts              (NEW /smsgw dev proxy to SMS gateway)
+```
+
+---
+
+## How to Verify
+
+```bash
+# Typecheck (no emit)
+npx tsc --noEmit
+
+# Dev server (needs PocketBase running at 127.0.0.1:8090)
+npm run dev
+# SMS uses the /smsgw proxy → http://192.168.31.22:8082 (restart dev after config change)
+
+# Build (emits single-file dist/index.html ~2.4 MB)
+npm run build
+```
+
+All changes are backward-compatible; no data migrations required. The SMS token and gateway URL are hardcoded in `src/SmsSection.tsx` (`SMS_TOKEN`, `SMS_ENDPOINT`) and `vite.config.ts`; adjust there if the gateway changes.
+</file>
 
 <file path="src/types/ai.ts">
 // ── AI Assistant frontend types ──
@@ -1189,6 +1428,41 @@ dist
 .env
 </file>
 
+<file path="AGENTS.md">
+# AGENTS.md
+
+School OS — a single-page React school-management app (students, fees, expenses, employees, equipment, attendance, schedules, PDF reports, AI assistant). All data logic is browser-side; there is no backend besides Firebase.
+
+## Commands
+
+- `npm run dev` — Vite dev server
+- `npm run build` — production build via `vite-plugin-singlefile` (inlines everything into one `dist/index.html`)
+- `npm run preview` — preview the built file
+- There is **no** test, lint, or typecheck script. TypeScript config is `strict: true`, but `noUnusedLocals`/`noUnusedParameters` are off.
+
+## Architecture
+
+- `src/App.tsx` (~5,700 lines) is a single monolithic component: all screens, forms, state, charts (recharts), PDF generation, and the sidebar are here. Tabs are a string-union `Tab` type (see `App.tsx:36`) — add a new screen by adding a Tab value, a sidebar entry, and a render branch.
+- `src/firebase.ts` is the entire data layer: Firestore (students, fees, expenses, employees, equipments, subjects, subjectConfigs, teacherSubjects, timetable, causalLeaves, salarySlipAudits) plus Realtime Database (attendance, holidays).
+- `src/Modals.tsx` ↔ `AppModals` (add/edit dialogs), `src/Attendance.tsx` ↔ `AttendanceSection`, `src/Schedule.tsx` ↔ `ScheduleSection` (timetable), `src/components/AIAssistant.tsx` (OpenRouter chat), `src/clUtils.ts` (casual-leave math), `src/PDFHelper.ts` (shared PDF header/footer/cover helpers).
+- Repo-local feature-request docs you may be asked to implement: `STUDENT-ADD-UPDATE.md`, `Student_Register_2026-08-05 (1).md`. `repomix-output.xml` is a stale code dump; `README.md` is a UTF-16 placeholder containing only `# school-os-start`. `dist/` and `node_modules/` are gitignored build output.
+
+## Firebase / data gotchas
+
+- The Firestore project (`school-tack`) is hard-coded in `src/firebase.ts` — no env vars involved. `.env` only carries the optional `VITE_OPENROUTER_KEY` / `VITE_OPENROUTER_MODEL` for the AI assistant; builds work without it.
+- Attendance + holidays save to RTDB first, then **auto-fallback to Firestore** on failure (`saveAttendance`, `saveBatchAttendance`). Reads merge both sources and de-dupe by `personId_date`. RTDB keys are sanitized (`makeAttKey`, replaces `. # $ [ ] /`), so record key = `{personId}_{date}`.
+- There is no Firestore emulator / offline setup and no write-through SDK: you're hitting the real project from the browser. Anything needing custom Firestore composite indexes will fail at deploy — `getFeesByDateRange` deliberately runs two separate queries and merges, because Firestore can't OR across fields.
+- Firestore cannot store `undefined`. Writes must go through `cleanData()` (strips undefined/null) — remember this when adding new save paths. `updateStudentAutoIdReferences` must be used when an autoId changes (updates fees, equipment, and attendance).
+
+## Conventions to follow
+
+- **Sequential global autoIds**, set on save, never in form state: `getNextSequentialId(collection)` → format `STU-001`, `FEE-001`, `EXP-001`, `EMP-001` with `padStart(3,'0')`. `generateAutoId()` is only a temporary placeholder for form defaults until save (see `handleSaveStudent`/`handleSaveFee` in `App.tsx`).
+- **Deactivated students** are identified by `autoId` starting with `D-` (e.g. `D-STU-001`); `isDeactivatedStudent()` (`App.tsx:699`) excludes them from all registers, lists, and PDFs. Keep prefixing the id `D-` on deactivation and re-adding plain `STU-` on reactivation.
+- UI theme is set in `main.tsx` from `localStorage('uiTheme')`. Under `data-theme="wrb"` a whole set of Tailwind classes (`bg-[#1E1E1E]`, `text-white`, `from-cyan-500`, etc.) is **re-mapped to a light theme in `src/index.css`**. When restyling, keep the dark palette consistent with these overrides or the light theme breaks.
+- PDFs are generated client-side with jspdf + jspdf-autotable; reuse the `PDFHelper.ts` helpers instead of hand-rolling headers/footers.
+- Mixing conventions: `App.tsx`/`firebase.ts` use pre-React-19 no-callback style with deeply nested JSX; match existing style rather than introducing new abstractions. Some form shapes use `as any` on `useState` — acceptable in this codebase.
+</file>
+
 <file path="src/Schedule.tsx">
 import React, { useState, useEffect, useCallback } from 'react';
 import { FiBookOpen, FiUsers, FiCalendar, FiPlus, FiEdit2, FiTrash2, FiSave, FiX, FiRefreshCw, FiEye, FiGrid, FiClock, FiAlertTriangle, FiPrinter, FiDownload, FiSliders, FiShield, FiZap, FiList } from 'react-icons/fi';
@@ -1233,6 +1507,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const [teacherSubjects, setTeacherSubjects] = useState<TeacherSubject[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Subjects form
   const [showSubjectForm, setShowSubjectForm] = useState(false);
@@ -1275,6 +1550,13 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     localStorage.setItem(SCHEDULE_KEY, JSON.stringify({ viewMode, selectedClass, numPeriods, periodSlots, breakAfterPeriod, maxDoubledPerDay, scheduleRules }));
   }, [viewMode, selectedClass, numPeriods, periodSlots, breakAfterPeriod, maxDoubledPerDay, scheduleRules]);
 
+  useEffect(() => {
+    if (!showRulesModal) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowRulesModal(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showRulesModal]);
+
   const activeEmployees = employees.filter(e => e.status === 'ACTIVE');
   const classes = [...new Set(students.map(s => s.class).filter(Boolean))].sort();
   const allTeacherSubjects = activeEmployees
@@ -1283,19 +1565,27 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     ? activeEmployees.filter(e => e.role?.toLowerCase().includes('teacher') || e.department?.toLowerCase().includes('teacher'))
     : activeEmployees;
 
-  useEffect(() => { loadSubjects(); loadTeacherSubjects(); loadTimetable(); loadSubjectConfigs(); }, []);
+  const reloadAll = useCallback(() => {
+    setLoadError(null);
+    loadSubjects();
+    loadTeacherSubjects();
+    loadTimetable();
+    loadSubjectConfigs();
+  }, []);
+
+  useEffect(() => { reloadAll(); }, [reloadAll]);
 
   const loadSubjects = async () => {
-    try { const d = await getSubjects(); setSubjects(d as Subject[]); } catch {}
+    try { const d = await getSubjects(); setSubjects(d as Subject[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
   const loadTeacherSubjects = async () => {
-    try { const d = await getTeacherSubjects(); setTeacherSubjects(d as TeacherSubject[]); } catch {}
+    try { const d = await getTeacherSubjects(); setTeacherSubjects(d as TeacherSubject[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
   const loadTimetable = async () => {
-    try { const d = await getTimetableEntries(); setTimetable(d as TimetableEntry[]); } catch {}
+    try { const d = await getTimetableEntries(); setTimetable(d as TimetableEntry[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
   const loadSubjectConfigs = async () => {
-    try { const d = await getSubjectConfigs(); setSubjectConfigs(d as SubjectConfig[]); } catch {}
+    try { const d = await getSubjectConfigs(); setSubjectConfigs(d as SubjectConfig[]); } catch (e) { setLoadError((e as any)?.message || 'Could not reach database'); }
   };
 
   // ===== Subjects CRUD =====
@@ -1552,6 +1842,11 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
       if (!jsonMatch) throw new Error('Invalid AI response');
       const fixes = JSON.parse(jsonMatch[0]) as Array<{ class: string; day: string; period: number; newSubjectId: string; newSubjectName: string; newTeacherId: string; newTeacherName: string }>;
 
+      if (!confirm(`Apply ${fixes.length} changes?`)) {
+        setLoading(false);
+        return;
+      }
+
       for (const fix of fixes) {
         const existing = timetable.find(e => e.class === fix.class && e.day === fix.day && e.period === fix.period);
         if (existing?.id) await deleteTimetableEntry(existing.id);
@@ -1567,11 +1862,16 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
       const remaining = getAllClashes();
       setClashReport(remaining);
       showNotification(`AI applied ${fixes.length} change(s) — ${remaining.length} clash(es) remaining`, remaining.length === 0 ? 'success' : 'error');
-    } catch { showNotification('AI fix failed', 'error'); }
+    } catch (err) { showNotification((err as any)?.message || 'Failed to apply AI fixes', 'error'); }
     setLoading(false);
   };
 
   const updatePeriodSlots = (n: number) => {
+    const customized = periodSlots.some((s, i) => {
+      const d = DEFAULT_PERIODS[i];
+      return d ? (s.startTime !== d.startTime || s.endTime !== d.endTime) : false;
+    });
+    if (customized && !confirm('Changing periods/day will reset your customized period times. Continue?')) return;
     setNumPeriods(n);
     setPeriodSlots(DEFAULT_PERIODS.slice(0, n));
   };
@@ -1728,6 +2028,11 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
         }
       }
 
+      const existingCount = timetable.filter(e => e.class === selectedClass).length;
+      if (existingCount > 0 && !confirm(`This will delete ${existingCount} existing timetable entries for this class. Continue?`)) {
+        setLoading(false);
+        return;
+      }
       await deleteTimetableForClass(selectedClass);
       await saveTimetableEntries(entries);
       await loadTimetable();
@@ -1773,9 +2078,9 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
   const handleCellClear = async () => {
     if (!selectedCell || !selectedClass) return;
     const existing = getEntry(selectedClass, selectedCell.day, selectedCell.period);
-    if (existing?.id) {
-      try { await deleteTimetableEntry(existing.id); await loadTimetable(); } catch {}
-    }
+      if (existing?.id) {
+        try { await deleteTimetableEntry(existing.id); await loadTimetable(); } catch (e) { showNotification('Failed to clear cell: ' + ((e as any)?.message || e), 'error'); }
+      }
     setSelectedCell(null);
   };
 
@@ -1902,8 +2207,16 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="bg-red-950/50 border border-red-500/30 rounded-xl p-4 flex items-center justify-between gap-4">
+          <p className="text-sm font-semibold text-red-400">Could not reach database — Is the backend running?</p>
+          <button onClick={reloadAll} className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-400 text-white rounded-lg text-sm font-semibold transition">
+            <FiRefreshCw size={14} /> Retry
+          </button>
+        </div>
+      )}
       {/* Sub-tab Navigation */}
-      <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-2 flex gap-1">
+      <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-2 flex flex-wrap gap-1">
         {subTabs.map(t => (
           <button
             key={t.id}
@@ -2278,14 +2591,14 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
                 </div>
 
                 <div className="flex flex-wrap gap-2 mb-6">
-                  <button onClick={clearTimetable} className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                  <button onClick={clearTimetable} title="Clear timetable" aria-label="Clear timetable" className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
                     <FiTrash2 size={16} />
                   </button>
                   {selectedClass && <>
                     <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
                       <FiDownload size={16} /> PDF
                     </button>
-                    <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
+                    <button onClick={handlePrint} title="Print timetable" aria-label="Print timetable" className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl text-sm transition border border-gray-700">
                       <FiPrinter size={16} /> Print
                     </button>
                   </>}
@@ -2361,8 +2674,12 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
                                 return (
                                   <td
                                     key={day}
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label={`${entry?.subjectId ? entry.subjectName + ' for ' + day + ' period ' + p : 'Empty slot ' + day + ' period ' + p}${isConflict ? ', teacher conflict' : ''}`}
                                     onClick={() => handleCellClick(day, p)}
-                                    className={`p-2 border border-gray-800 cursor-pointer transition-all relative ${isSelected ? 'ring-2 ring-cyan-500' : ''} ${isEmpty ? 'hover:bg-gray-800/50' : 'hover:bg-gray-800/30'}`}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCellClick(day, p); } }}
+                                    className={`p-2 border border-gray-800 cursor-pointer transition-all relative focus-visible:ring-2 focus-visible:ring-cyan-500 focus:outline-none ${isSelected ? 'ring-2 ring-cyan-500' : ''} ${isEmpty ? 'hover:bg-gray-800/50' : 'hover:bg-gray-800/30'}`}
                                   >
                                     {isSelected && selectedCell ? (
                                       <div className="space-y-1.5" onClick={e => e.stopPropagation()}>
@@ -2375,8 +2692,8 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
                                           {displayTeachers.map(e => <option key={e.autoId} value={e.autoId}>{e.name}</option>)}
                                         </select>
                                         <div className="flex gap-1">
-                                          <button onClick={handleCellSave} className="flex-1 px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-white rounded text-xs font-semibold"><FiSave size={12} /></button>
-                                          <button onClick={handleCellClear} className="px-2 py-1 bg-red-500 hover:bg-red-400 text-white rounded text-xs font-semibold"><FiX size={12} /></button>
+                                          <button onClick={handleCellSave} title="Save cell" aria-label="Save cell" className="flex-1 px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-white rounded text-xs font-semibold"><FiSave size={12} /></button>
+                                          <button onClick={handleCellClear} title="Clear cell" aria-label="Clear cell" className="px-2 py-1 bg-red-500 hover:bg-red-400 text-white rounded text-xs font-semibold"><FiX size={12} /></button>
                                         </div>
                                       </div>
                                     ) : isEmpty ? (
@@ -2517,7 +2834,7 @@ ${scheduleRules ? `\nUser-defined scheduling rules:\n${scheduleRules}\n` : ''}` 
 
 <file path="src/components/AIAssistant.tsx">
 import React, { useState, useRef, useEffect } from 'react';
-import { FiX, FiSend, FiPaperclip, FiUser, FiCpu } from 'react-icons/fi';
+import { FiX, FiSend, FiPaperclip, FiUser, FiCpu, FiSquare } from 'react-icons/fi';
 import type { ChatMessage, AttachmentContent } from '../types/ai';
 
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY || '';
@@ -2546,6 +2863,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2563,6 +2881,10 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
       if (file.size > MAX_FILE_SIZE) {
         setError(`File too large: ${file.name} (max 25 MB)`);
         continue;
+      }
+
+      if (!file.type.startsWith('image/')) {
+        setError('Note: only images are analyzed — PDF/video kept locally but not sent.');
       }
 
       const data = await fileToBase64(file);
@@ -2632,6 +2954,9 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
     setLoading(true);
     setError(null);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const openRouterMessages = buildMessages();
 
@@ -2643,6 +2968,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
           'HTTP-Referer': window.location.origin,
           'X-Title': 'School OS',
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model: OPENROUTER_MODEL,
           messages: openRouterMessages,
@@ -2669,6 +2995,10 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
       };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        setError('Generation stopped.');
+        return;
+      }
       console.error('AI Assistant error:', err);
       setMessages(prev => [...prev, {
         id: nextId(),
@@ -2678,12 +3008,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
       }]);
     } finally {
       setLoading(false);
+      abortRef.current = null;
       textareaRef.current?.focus();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !loading) {
       e.preventDefault();
       sendMessage();
     }
@@ -2705,7 +3036,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
           <p className="text-[10px] text-gray-400 truncate">Gemma via OpenRouter</p>
         </div>
         {!isPage && (
-          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white transition p-1 shrink-0">
+          <button onClick={() => setOpen(false)} aria-label="Close AI Assistant" className="text-gray-400 hover:text-white transition p-1 shrink-0">
             <FiX size={18} />
           </button>
         )}
@@ -2792,8 +3123,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
             <span key={i} className="flex items-center gap-1.5 bg-gray-800/80 rounded-lg px-2.5 py-1 text-xs text-gray-300">
               {att.mime.startsWith('image/') ? '📷' : att.mime === 'application/pdf' ? '📄' : '🎥'}
               <span className="truncate max-w-[100px]">{att.originalName}</span>
-              <button onClick={() => removeAttachment(i)} className="text-gray-500 hover:text-red-400 ml-0.5">
-                <FiX size={12} />
+               <button onClick={() => removeAttachment(i)} aria-label={`Remove attachment ${att.originalName}`} className="text-gray-500 hover:text-red-400 ml-0.5">
+                 <FiX size={12} />
               </button>
             </span>
           ))}
@@ -2805,6 +3136,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
         <div className="flex items-end gap-2">
           <button
             onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach file"
             className="p-2.5 text-gray-400 hover:text-cyan-400 hover:bg-gray-800/60 rounded-xl transition shrink-0 mb-0.5"
             title="Attach file"
           >
@@ -2823,11 +3155,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
               className="flex-1 bg-gray-800/80 border border-gray-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500/50 transition min-h-[42px] max-h-[120px]"
             />
             <button
-              onClick={sendMessage}
-              disabled={loading || (!input.trim() && attachments.length === 0)}
+              onClick={loading ? () => abortRef.current?.abort() : sendMessage}
+              disabled={!loading && (!input.trim() && attachments.length === 0)}
+              aria-label={loading ? 'Stop generation' : 'Send message'}
               className="p-2.5 text-white bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed transition shrink-0 mb-0.5"
             >
-              <FiSend size={18} />
+              {loading ? <FiSquare size={18} /> : <FiSend size={18} />}
             </button>
           </div>
         </div>
@@ -2843,13 +3176,14 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
     <>
       <button
         onClick={() => setOpen(!open)}
+        aria-label={open ? 'Close AI Assistant' : 'Open AI Assistant'}
         className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-full shadow-2xl shadow-cyan-500/30 flex items-center justify-center transition-all hover:scale-110 active:scale-95"
         title="AI Assistant"
       >
         {open ? <FiX size={24} /> : <FiCpu size={24} />}
       </button>
       {open && (
-        <div className="fixed bottom-24 right-6 z-40 w-96 h-[600px] max-h-[calc(100vh-180px)] bg-[#1A1A2E] border border-gray-700/50 rounded-2xl shadow-2xl backdrop-blur-xl">
+        <div className="fixed bottom-24 right-6 z-40 w-[min(24rem,calc(100vw-3rem))] h-[600px] max-h-[calc(100vh-180px)] bg-[#1A1A2E] border border-gray-700/50 rounded-2xl shadow-2xl backdrop-blur-xl">
           {chatPanel}
         </div>
       )}
@@ -2858,9 +3192,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
 };
 
 function renderMarkdown(text: string): React.ReactNode {
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
   const lines = text.split('\n');
   return lines.map((line, i) => {
-    const rendered = line
+    const rendered = escapeHtml(line)
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/__(.*?)__/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -3485,6 +3822,21 @@ const inputReadonly = "w-full p-2 bg-gray-700 rounded border border-gray-600 tex
 
 export const AppModals: React.FC<ModalProps> = (p) => {
   const [feeStudentSearch, setFeeStudentSearch] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const guardSave = (fn: () => void) => () => {
+    if (saving) return;
+    setSaving(true);
+    try { fn(); } finally { setSaving(false); }
+  };
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') p.onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [p.onClose]);
 
   const toggleSubmittedDocument = (documentName: string) => {
     p.setStudentForm(prev => {
@@ -3498,16 +3850,16 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
   const renderClassMgmt = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Classes</h3><button onClick={() => p.setShowClassMgmt(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
+      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Classes</h3><button onClick={() => p.setShowClassMgmt(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
       <div className="flex gap-2">
-        <input placeholder="Enter class (e.g., 10A)" value={p.newClassName} onChange={e => p.setNewClassName(e.target.value.toUpperCase())} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase" onKeyPress={e => e.key === 'Enter' && p.handleAddClass()} />
-        <button onClick={p.handleAddClass} className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg"><FiPlus size={18} /></button>
+        <input placeholder="Enter class (e.g., 10A)" value={p.newClassName} onChange={e => p.setNewClassName(e.target.value.toUpperCase())} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase" onKeyDown={e => e.key === 'Enter' && p.handleAddClass()} />
+        <button onClick={p.handleAddClass} aria-label="Add class" title="Add class" className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg"><FiPlus size={18} /></button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto">
         {p.classes.map(c => (
           <div key={c} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
             <span className="font-mono text-cyan-400">{c}</span>
-            <button onClick={() => p.handleRemoveClass(c)} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
+            <button onClick={() => { if (!confirm('Are you sure you want to remove ' + c + '?')) return; p.handleRemoveClass(c); }} aria-label={'Remove ' + c} title={'Remove ' + c} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
           </div>
         ))}
       </div>
@@ -3517,17 +3869,17 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
   const renderPackageMgmt = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Fee Packages</h3><button onClick={() => p.setShowPackageMgmt(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
+      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Fee Packages</h3><button onClick={() => p.setShowPackageMgmt(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <input placeholder="Package Name" value={p.newPackageName} onChange={e => p.setNewPackageName(e.target.value)} className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" />
-        <input type="number" placeholder="Amount (₹)" value={p.newPackageAmount} onChange={e => p.setNewPackageAmount(e.target.value)} className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" onKeyPress={e => e.key === 'Enter' && p.handleAddPackage()} />
+        <input type="number" min={0} placeholder="Amount (₹)" value={p.newPackageAmount} onChange={e => p.setNewPackageAmount(e.target.value)} className="p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" onKeyDown={e => e.key === 'Enter' && p.handleAddPackage()} />
         <button onClick={p.handleAddPackage} className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2"><FiPlus size={18} /> Add</button>
       </div>
       <div className="space-y-2 max-h-60 overflow-y-auto">
         {p.packages.map(pkg => (
           <div key={pkg.name} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
             <div><span className="font-semibold text-white">{pkg.name}</span><span className="ml-2 text-yellow-400">₹{pkg.amount.toLocaleString()}</span></div>
-            <button onClick={() => p.handleRemovePackage(pkg.name)} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
+            <button onClick={() => { if (!confirm('Are you sure you want to remove ' + pkg.name + '?')) return; p.handleRemovePackage(pkg.name); }} aria-label={'Remove ' + pkg.name} title={'Remove ' + pkg.name} className="text-red-400 hover:text-red-300"><FiX size={18} /></button>
           </div>
         ))}
       </div>
@@ -3538,14 +3890,14 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
   const renderDocumentMgmt = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Submitted Documents</h3><button onClick={() => p.setShowDocumentMgmt(false)} className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
+      <div className="flex justify-between items-center"><h3 className="text-xl font-bold text-cyan-400">Manage Submitted Documents</h3><button onClick={() => p.setShowDocumentMgmt(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white"><FiX size={24} /></button></div>
       <div className="flex gap-2">
         <input placeholder="Enter document name" value={p.newDocumentName} onChange={e => p.setNewDocumentName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); p.handleAddDocumentOption(); } }} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" />
         <button type="button" onClick={p.handleAddDocumentOption} className="px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg font-semibold flex items-center justify-center gap-2"><FiPlus size={18} /> Add</button>
       </div>
       <div className="space-y-2 max-h-72 overflow-y-auto">
         {p.documentOptions.length === 0 ? <div className="p-6 text-center bg-gray-800 rounded-lg border border-gray-700 text-gray-400">No document options added yet.</div> : p.documentOptions.map(documentName => (
-          <div key={documentName} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700"><span className="text-white font-medium">{documentName}</span><button type="button" onClick={() => p.handleRemoveDocumentOption(documentName)} className="text-red-400 hover:text-red-300" title="Remove document"><FiX size={18} /></button></div>
+          <div key={documentName} className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700"><span className="text-white font-medium">{documentName}</span>        <button type="button" onClick={() => p.handleRemoveDocumentOption(documentName)} className="text-red-400 hover:text-red-300" title="Remove document" aria-label={'Remove ' + documentName}><FiX size={18} /></button></div>
         ))}
       </div>
       <button onClick={() => p.setShowDocumentMgmt(false)} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white p-3 rounded-lg font-bold">Done</button>
@@ -3558,8 +3910,8 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Name</label><input value={p.schoolSettings.schoolName} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, schoolName: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input value={p.schoolSettings.address} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, address: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input value={p.schoolSettings.phone} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, phone: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input value={p.schoolSettings.email} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, email: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input type="tel" inputMode="tel" value={p.schoolSettings.phone} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, phone: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" value={p.schoolSettings.email} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, email: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Primary Color</label><div className="flex gap-2"><input type="color" value={p.schoolSettings.primaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, primaryColor: e.target.value })} className="w-12 h-10 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer" /><input value={p.schoolSettings.primaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, primaryColor: e.target.value })} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-mono" /></div></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Secondary Color</label><div className="flex gap-2"><input type="color" value={p.schoolSettings.secondaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, secondaryColor: e.target.value })} className="w-12 h-10 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer" /><input value={p.schoolSettings.secondaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, secondaryColor: e.target.value })} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-mono" /></div></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Logo</label><div className="flex items-center gap-4">{p.schoolSettings.schoolLogo && <img src={p.schoolSettings.schoolLogo} alt="Logo" className="w-20 h-20 rounded-lg border-2 border-cyan-500" />}<label className="flex-1 flex items-center gap-2 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition"><FiUpload /><span>{p.schoolSettings.schoolLogo ? 'Change Logo' : 'Upload Logo'}</span><input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => p.setSchoolSettings({ ...p.schoolSettings, schoolLogo: ev.target?.result as string }); r.readAsDataURL(f); }} className="hidden" /></label></div></div>
@@ -3629,7 +3981,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       <label className="text-xs text-cyan-400">Upload Bill (Image)</label>
       <div className="flex gap-2">
         <label className="flex-1 flex items-center gap-2 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition"><FiUpload /><span>{p.billFile?.name || 'Choose File'}</span><input type="file" accept="image/*" onChange={p.handleBillUpload} className="hidden" disabled={p.uploading} /></label>
-        {billUrl && <button onClick={() => p.previewBill(billUrl)} className="px-4 py-3 bg-cyan-600 rounded-lg hover:bg-cyan-700"><FiEye /></button>}
+        {billUrl && <button onClick={() => p.previewBill(billUrl)} aria-label="Preview bill" title="Preview bill" className="px-4 py-3 bg-cyan-600 rounded-lg hover:bg-cyan-700"><FiEye /></button>}
       </div>
       {p.uploading && <p className="text-sm text-cyan-400">Uploading...</p>}
     </div>
@@ -3645,13 +3997,13 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         </div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Name <span className="text-yellow-400">(Auto Caps)</span></label><input placeholder="STUDENT NAME" value={p.studentForm.name} onChange={e => p.handleAutoCaps(e, 'name', p.setStudentForm)} className={inputCls + ' uppercase'} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Roll Number <span className="text-gray-500">(synced with ID)</span></label><input value={p.studentForm.rollNumber || 'Auto-generated on save'} readOnly className={inputReadonly} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Class <span className="text-yellow-400">(Auto Caps)</span></label><div className="flex gap-2"><select value={p.studentForm.class} onChange={e => p.handleAutoCaps(e, 'class', p.setStudentForm)} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase"><option value="">-- Select Class --</option>{p.classes.map(c => <option key={c} value={c}>{c}</option>)}</select><button onClick={() => p.setShowClassMgmt(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-700 text-white"><FiSettings size={18} /></button></div></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Class <span className="text-yellow-400">(Auto Caps)</span></label><div className="flex gap-2"><select value={p.studentForm.class} onChange={e => p.handleAutoCaps(e, 'class', p.setStudentForm)} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white uppercase"><option value="">-- Select Class --</option>{p.classes.map(c => <option key={c} value={c}>{c}</option>)}</select><button onClick={() => p.setShowClassMgmt(true)} aria-label="Manage classes" title="Manage classes" className="p-3 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-700 text-white"><FiSettings size={18} /></button></div></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Gender</label><select value={p.studentForm.gender} onChange={e => p.handleAutoCaps(e, 'gender', p.setStudentForm)} className={inputCls + ' uppercase'}><option value="MALE">MALE</option><option value="FEMALE">FEMALE</option><option value="OTHER">OTHER</option></select></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Date of Birth</label><input type="date" value={p.studentForm.dateOfBirth} onChange={e => p.setStudentForm({ ...p.studentForm, dateOfBirth: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Admission Date</label><input type="date" value={p.studentForm.admissionDate} onChange={e => p.setStudentForm({ ...p.studentForm, admissionDate: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Name <span className="text-yellow-400">(Auto Caps)</span></label><input placeholder="PARENT NAME" value={p.studentForm.parentName} onChange={e => p.handleAutoCaps(e, 'parentName', p.setStudentForm)} className={inputCls + ' uppercase'} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Phone</label><input placeholder="Parent Phone" value={p.studentForm.parentPhone} onChange={e => p.setStudentForm({ ...p.studentForm, parentPhone: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input placeholder="Email" value={p.studentForm.email} onChange={e => p.setStudentForm({ ...p.studentForm, email: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Parent Phone</label><input type="tel" inputMode="tel" placeholder="Parent Phone" value={p.studentForm.parentPhone} onChange={e => p.setStudentForm({ ...p.studentForm, parentPhone: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" placeholder="Email" value={p.studentForm.email} onChange={e => p.setStudentForm({ ...p.studentForm, email: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Status</label><select value={p.studentForm.status} onChange={e => p.handleAutoCaps(e, 'status', p.setStudentForm)} className={inputCls + ' uppercase'}><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input placeholder="Address" value={p.studentForm.address} onChange={e => p.setStudentForm({ ...p.studentForm, address: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1 col-span-2">
@@ -3665,7 +4017,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
               {p.packages.map(pkg => <option key={pkg.name} value={pkg.name}>{pkg.name} - ₹{pkg.amount.toLocaleString()}</option>)}
               <option value="Custom">Custom Amount</option>
             </select>
-            <input type="number" placeholder="Amount" value={p.studentForm.feeAmount || ''} onChange={e => {
+            <input type="number" min={0} placeholder="Amount" value={p.studentForm.feeAmount || ''} onChange={e => {
               const val = parseFloat(e.target.value) || 0;
               p.setStudentForm(prev => ({ ...prev, feeAmount: val, package: val > 0 ? 'Custom' : prev.package }));
             }} className="w-40 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-semibold focus:border-cyan-500 focus:outline-none" />
@@ -3698,7 +4050,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
           )}
         </div>
       </div>
-      <button onClick={p.handleSaveStudent} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Student' : 'Update Student'}</button>
+      <button onClick={guardSave(p.handleSaveStudent)} disabled={saving} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed">{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Student' : 'Update Student')}</button>
     </div>
   );
 
@@ -3809,7 +4161,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
           <input value={p.feeForm.description} onChange={e => p.setFeeForm({ ...p.feeForm, description: e.target.value })} className={inputCls} />
         </div>
       </div>
-      <button onClick={p.handleSaveFee} disabled={!p.feeForm.studentId} className={`w-full py-2.5 rounded-lg font-bold text-sm ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>{p.modalType === 'add' ? 'Add Fee' : 'Update Fee'}</button>
+      <button onClick={guardSave(p.handleSaveFee)} disabled={saving || !p.feeForm.studentId} className={`w-full py-2.5 rounded-lg font-bold text-sm ${p.feeForm.studentId ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20' : 'bg-gray-600 text-gray-400 cursor-not-allowed'} disabled:opacity-60 disabled:cursor-not-allowed`}>{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Fee' : 'Update Fee')}</button>
     </div>
   );
 
@@ -3829,7 +4181,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Description</label><input value={p.expenseForm.description} onChange={e => p.setExpenseForm({ ...p.expenseForm, description: e.target.value })} className={inputCls} /></div>
         {renderBillUpload(p.expenseForm.billUrl)}
       </div>
-      <button onClick={p.handleSaveExpense} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Expense' : 'Update Expense'}</button>
+      <button onClick={guardSave(p.handleSaveExpense)} disabled={saving} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed">{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Expense' : 'Update Expense')}</button>
     </div>
   );
 
@@ -3839,10 +4191,10 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1"><label className="text-xs text-cyan-400">Auto ID</label><input value={p.employeeForm.autoId} readOnly className={inputReadonly} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Name <span className="text-yellow-400">(Auto Caps)</span></label><input placeholder="EMPLOYEE NAME" value={p.employeeForm.name} onChange={e => p.handleAutoCaps(e, 'name', p.setEmployeeForm)} className={inputCls + ' uppercase'} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Role / Position</label><select value={p.employeeForm.role} onChange={e => p.handleAutoCaps(e, 'role', p.setEmployeeForm)} className={inputCls + ' uppercase'}><option>TEACHER</option><option>PRINCIPAL</option><option>ADMIN STAFF</option><option>ACCOUNTANT</option><option>LIBRARIAN</option><option>PEON</option><option>SECURITY</option><option>DRIVER</option><option>OTHER</option></select></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input placeholder="Phone" value={p.employeeForm.phone} onChange={e => p.setEmployeeForm({ ...p.employeeForm, phone: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input placeholder="Email" value={p.employeeForm.email} onChange={e => p.setEmployeeForm({ ...p.employeeForm, email: e.target.value })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">New Salary (₹)</label><input type="number" value={p.employeeForm.salary || ''} onChange={e => p.setEmployeeForm({ ...p.employeeForm, salary: parseFloat(e.target.value) || 0 })} className={inputCls} /></div>
-        <div className="space-y-1"><label className="text-xs text-cyan-400">Old Salary (₹)</label><input type="number" value={(p.employeeForm as any).oldSalary || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), oldSalary: parseFloat(e.target.value) || 0 }))} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input type="tel" inputMode="tel" placeholder="Phone" value={p.employeeForm.phone} onChange={e => p.setEmployeeForm({ ...p.employeeForm, phone: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" placeholder="Email" value={p.employeeForm.email} onChange={e => p.setEmployeeForm({ ...p.employeeForm, email: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">New Salary (₹)</label><input type="number" min={0} value={p.employeeForm.salary || ''} onChange={e => p.setEmployeeForm({ ...p.employeeForm, salary: parseFloat(e.target.value) || 0 })} className={inputCls} /></div>
+        <div className="space-y-1"><label className="text-xs text-cyan-400">Old Salary (₹)</label><input type="number" min={0} value={(p.employeeForm as any).oldSalary || ''} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), oldSalary: parseFloat(e.target.value) || 0 }))} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Auto Salary Refresh</label><label className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white cursor-pointer"><input type="checkbox" checked={Boolean((p.employeeForm as any).salaryAutoRefresh)} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), salaryAutoRefresh: e.target.checked }))} className="w-4 h-4 accent-cyan-500" /><span className="text-sm font-semibold">Enable monthly refresh</span></label></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Salary Refresh Day</label><input type="number" min={1} max={28} value={(p.employeeForm as any).salaryRefreshDay || 1} onChange={e => p.setEmployeeForm(prev => ({ ...(prev as any), salaryRefreshDay: Math.min(Math.max(parseInt(e.target.value) || 1, 1), 28) }))} className={inputCls} /><p className="text-xs text-gray-500">Creates salary expense every month on/after this day.</p></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Join Date</label><input type="date" value={p.employeeForm.joinDate} onChange={e => p.setEmployeeForm({ ...p.employeeForm, joinDate: e.target.value })} className={inputCls} /></div>
@@ -3857,7 +4209,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input placeholder="Address" value={p.employeeForm.address} onChange={e => p.setEmployeeForm({ ...p.employeeForm, address: e.target.value })} className={inputCls} /></div>
 
       </div>
-      <button onClick={p.handleSaveEmployee} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20">{p.modalType === 'add' ? 'Add Employee' : 'Update Employee'}</button>
+      <button onClick={guardSave(p.handleSaveEmployee)} disabled={saving} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white p-4 rounded-lg font-bold text-lg shadow-lg shadow-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed">{saving ? 'Saving…' : (p.modalType === 'add' ? 'Add Employee' : 'Update Employee')}</button>
     </div>
   );
 
@@ -3916,7 +4268,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-indigo-400 bg-clip-text text-transparent">Offer Letter Settings</h2>
-          <button onClick={() => p.setShowOfferLetterSettings(false)} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={24} /></button>
+          <button onClick={() => p.setShowOfferLetterSettings(false)} aria-label="Close" title="Close" className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={24} /></button>
         </div>
         <div className="space-y-4">
           <div className="space-y-1"><label className="text-xs text-cyan-400">Offer Title</label><input value={p.schoolSettings.offerTitle || 'Offer Letter'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerTitle: e.target.value })} className={inputCls} /></div>
@@ -3939,12 +4291,12 @@ export const AppModals: React.FC<ModalProps> = (p) => {
                     <div key={di} className="flex gap-1 items-center">
                       <span className="text-gray-500 text-xs shrink-0">•</span>
                       <input value={desc} onChange={e => updateDesc(i, di, e.target.value)} className="flex-1 p-1.5 bg-gray-900 rounded-lg border border-gray-700 text-white text-xs" placeholder={`Description ${di + 1}`} />
-                      <button onClick={() => removeDesc(i, di)} className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
+                       <button onClick={() => removeDesc(i, di)} aria-label="Remove description" title="Remove description" className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
                     </div>
                   ))}
                   <button onClick={() => addDesc(i)} className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"><FiPlus size={12} /> Add description</button>
                 </div>
-                <button onClick={() => removePoint(i)} className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded mt-1"><FiX size={16} /></button>
+                <button onClick={() => removePoint(i)} aria-label="Remove point" title="Remove point" className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded mt-1"><FiX size={16} /></button>
               </div>
             ))}
           </div>
@@ -3979,11 +4331,11 @@ export const AppModals: React.FC<ModalProps> = (p) => {
   const isFeeForm = p.activeTab === 'fees' || p.forceFeeForm;
 
   return (
-    <div className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${isFeeForm ? 'p-0' : 'p-4'}`}>
-      <div className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${isFeeForm ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
+    <div onClick={p.onClose} className={`fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 ${isFeeForm ? 'p-0' : 'p-4'}`}>
+      <div onClick={e => e.stopPropagation()} className={`bg-[#1E1E1E] border border-gray-800 shadow-2xl ${isFeeForm ? 'h-screen w-screen rounded-none p-4' : 'rounded-2xl p-8 max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
         <div className={`flex justify-between items-center border-b border-gray-800 ${isFeeForm ? 'mb-3 pb-2' : 'mb-6 pb-4'}`}>
           <h3 className={`font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent ${isFeeForm ? 'text-lg' : 'text-2xl'}`}>{p.modalTitle}</h3>
-          <button onClick={p.onClose} className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={isFeeForm ? 20 : 28} /></button>
+          <button onClick={p.onClose} aria-label="Close" title="Close" className="text-gray-400 hover:text-white transition hover:rotate-90 duration-300"><FiX size={isFeeForm ? 20 : 28} /></button>
         </div>
         {renderContent()}
       </div>
@@ -4017,6 +4369,7 @@ interface AttendanceProps {
   logSalarySlipAudit?: (employeeId: string) => Promise<void>;
   updateEmployee: (id: string, data: any) => Promise<void>;
   handleDirectSalaryPay?: (expense: any) => Promise<void>;
+  deleteSalaryExpenses?: (expenses: Expense[]) => Promise<void>;
 }
 
 // Check if a date is a Sunday (auto holiday)
@@ -4033,7 +4386,7 @@ const isManualHoliday = (dateStr: string, holidays: Holiday[]) => {
 export const AttendanceSection: React.FC<AttendanceProps> = ({
   employees, attendance, holidays, expenses, schoolSettings, isReadOnly,
   saveAttendance, addHoliday, deleteHoliday, showNotification, loadData,
-  logSalarySlipAudit, updateEmployee, handleDirectSalaryPay
+  logSalarySlipAudit, updateEmployee, handleDirectSalaryPay, deleteSalaryExpenses
 }) => {
   const [subTab, setSubTab] = useState<'employee' | 'holidays' | 'causalLeaves'>('employee');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -4111,6 +4464,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         if (rows.length === 0) { showNotification('No data found', 'error'); return; }
 
         let success = 0, failed = 0;
+        const errors: string[] = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           const personId = String(row['Auto ID'] || row['Employee ID'] || row['Student ID'] || row['ID'] || '').trim();
@@ -4119,12 +4473,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
           const date = String(row['Date'] || selectedDate || '').trim();
           const personType = 'employee';
 
-          if (!personId && !personName) { failed++; continue; }
-          if (!['present', 'absent', 'late'].includes(status)) { failed++; continue; }
+          if (!personId && !personName) { failed++; errors.push(`Row ${i + 1}: Missing Auto ID and Name`); continue; }
+          if (!['present', 'absent', 'late'].includes(status)) { failed++; errors.push(`Row ${i + 1}: Invalid status "${status || '(empty)'}"`); continue; }
 
           // Find matching person
           const person = employees.find(p => p.autoId === personId || p.name.toLowerCase() === personName.toLowerCase());
-          if (!person) { failed++; continue; }
+          if (!person) { failed++; errors.push(`Row ${i + 1}: No matching employee for "${personName || personId}"`); continue; }
 
           try {
             await saveAttendance({
@@ -4136,11 +4490,20 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
               role: (person as any).role,
             });
             success++;
-          } catch (err) { failed++; }
+          } catch (err) { failed++; errors.push(`Row ${i + 1}: ${err instanceof Error ? err.message : 'Save failed'}`); }
           await new Promise(r => setTimeout(r, 30));
         }
         await loadData();
-        showNotification(`Imported ${success} attendance records${failed > 0 ? `, ${failed} failed` : ''}`, failed > 0 ? 'error' : 'success');
+        let msg = `Imported ${success} attendance records`;
+        if (failed > 0) {
+          msg += `, ${failed} failed`;
+          if (errors.length) {
+            const shown = errors.slice(0, 3);
+            msg += ': ' + shown.join('; ');
+            if (errors.length > 3) msg += ` +${errors.length - 3} more`;
+          }
+        }
+        showNotification(msg, failed > 0 ? 'error' : 'success');
       } catch (error) { showNotification('Failed to read file', 'error'); }
     };
     reader.readAsArrayBuffer(file);
@@ -4938,13 +5301,17 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   const dayLabel = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const statusInfo = dateStatus(selectedDate);
 
-  const isEmployeePaidForMonth = (emp: Employee, month: string) => {
-    return expenses.some(e =>
+  const getPaidSalaryExpenses = (emp: Employee, month: string) => {
+    return expenses.filter(e =>
       e.employeeId === emp.autoId &&
       e.category === 'Salaries' &&
       e.status === 'paid' &&
       ((e.salaryMonth || '') === month || (e.date || '').startsWith(month))
     );
+  };
+
+  const isEmployeePaidForMonth = (emp: Employee, month: string) => {
+    return getPaidSalaryExpenses(emp, month).length > 0;
   };
 
   return (
@@ -5031,7 +5398,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     <div className="flex items-center gap-3 mb-3 flex-wrap">
                       <span className="text-xs text-gray-400">Salary:</span>
                       <button type="button" onClick={() => { setSalaryType('new'); setEditMonthSalary(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'new' ? 'bg-cyan-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>New (₹{selectedEmployee.salary?.toLocaleString()})</button>
-                      <button type="button" onClick={() => { setSalaryType('old'); setSelectedMonthlyEmployeeId(''); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'old' ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>Old</button>
+                      <button type="button" onClick={() => { setSalaryType('old'); setEditMonthSalary(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'old' ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>Old</button>
                       {salaryType === 'old' && !editMonthSalary && (
                         <button type="button" onClick={() => { const cur = selectedEmployee.monthSalary?.[selectedDate.substring(0, 7)]; setMonthSalaryInput(String(cur ?? selectedEmployee.oldSalary ?? selectedEmployee.salary ?? '')); setEditMonthSalary(true); }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30 transition">Update Salary for Month</button>
                       )}
@@ -5133,7 +5500,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const effAbsent = info.absentDays;
                         const effSalary = info.earnedSalary;
                         const clLeft = remainingAnnual;
-                        const paid = isEmployeePaidForMonth(e, selectedDate.substring(0, 7));
+                        const paidExpenses = getPaidSalaryExpenses(e, selectedDate.substring(0, 7));
+                        const paid = paidExpenses.length > 0;
                         return (
                           <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3"><p className="font-semibold text-sm">{e.name}</p><p className="text-xs text-gray-500">{e.role}</p></td>
@@ -5145,9 +5513,20 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                             <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
                             <td className="px-4 py-3">
                               {paid ? (
-                                <span className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-semibold rounded-lg border border-red-500/30">
-                                  <FiCheck size={13} /> Paid
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-semibold rounded-lg border border-red-500/30">
+                                    <FiCheck size={13} /> Paid
+                                  </span>
+                                  {!isReadOnly && deleteSalaryExpenses && (
+                                    <button
+                                      onClick={() => deleteSalaryExpenses(paidExpenses)}
+                                      title={`Mark salary expense unpaid for ${e.name} (record kept in Expenses)`}
+                                      className="flex items-center gap-1 px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 text-xs font-semibold rounded-lg border border-red-500/30 transition"
+                                    >
+                                      <FiTrash2 size={13} /> Unpay
+                                    </button>
+                                  )}
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => openDirectPay(e, effSalary)}
@@ -5211,7 +5590,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                 <button
                   onClick={() => {
                     const n = parseInt(clQuotaInput);
-                    if (isNaN(n) || n < 0) return;
+                    if (isNaN(n) || n < 0 || n > 365) { showNotification('CL quota must be a number between 0 and 365', 'error'); return; }
                     setClQuota(n);
                     localStorage.setItem('clQuota', String(n));
                     setClQuotaEdit(false);
@@ -5426,7 +5805,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       <td className="px-6 py-3 text-gray-400">{new Date(h.date).toLocaleDateString('en-US', { weekday: 'long' })}</td>
                       <td className="px-6 py-3 font-semibold">{h.name}</td>
                       <td className="px-6 py-3"><span className={`px-2 py-1 rounded text-xs font-semibold ${h.type === 'sunday' ? 'bg-purple-500/20 text-purple-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{h.type === 'sunday' ? 'Auto (Sunday)' : 'Manual'}</span></td>
-                      <td className="px-6 py-3">{!isReadOnly && h.type === 'manual' && <button onClick={() => handleDeleteHoliday(h.id!)} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={16} /></button>}{isReadOnly && <FiEye className="text-gray-600" size={14} />}</td>
+                       <td className="px-6 py-3">{!isReadOnly && h.type === 'manual' && <button onClick={() => handleDeleteHoliday(h.id!)} title="Delete holiday" aria-label="Delete holiday" className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={16} /></button>}{isReadOnly && <FiEye className="text-gray-600" size={14} />}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -5443,7 +5822,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
           <div className="relative bg-[#1E1E1E] rounded-2xl border border-gray-800 w-full max-w-md p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-emerald-400" /> Direct Pay</h3>
-              <button onClick={() => !directPaying && setDirectPay(null)} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400"><FiX size={18} /></button>
+              <button onClick={() => !directPaying && setDirectPay(null)} title="Close" aria-label="Close" className="p-2 hover:bg-gray-800 rounded-lg text-gray-400"><FiX size={18} /></button>
             </div>
             <div className="space-y-4">
               <div>
@@ -5683,7 +6062,7 @@ import {
   addExpense, getExpenses, updateExpense, deleteExpense,
   addEmployee, getEmployees, updateEmployee, deleteEmployee,
   addEquipment, getEquipments, updateEquipment, deleteEquipment,
-  saveAttendance, getAttendance, deleteAttendance, deleteAllStudentAttendance,
+  saveAttendance, getAttendance, deleteAttendance,
   addHoliday, getHolidays, deleteHoliday,
   getNextSequentialId,
   uploadImage, generateAutoId,
@@ -5714,7 +6093,6 @@ const App: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [attendance, setAttendance] = useState<Att[]>([]);
-  const [deletingStudentAttendance, setDeletingStudentAttendance] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [docEditSelectedStudents, setDocEditSelectedStudents] = useState<string[]>([]);
   const [docEditSearch, setDocEditSearch] = useState('');
@@ -6459,6 +6837,11 @@ const App: React.FC = () => {
   }, [resetModalSubViews]);
 
   const handleSaveStudent = async (forceAdd = false) => {
+    if (!studentForm.name.trim()) return showNotification('Student Name is required', 'error');
+    if (!studentForm.class.trim()) return showNotification('Class is required', 'error');
+    if (!studentForm.parentName.trim()) return showNotification('Parent / Guardian name is required', 'error');
+    if (!studentForm.parentPhone.trim()) return showNotification('Parent phone is required', 'error');
+    if (!(Number(studentForm.feeAmount) > 0)) return showNotification('Fee Amount must be greater than 0', 'error');
     try {
       const final: Student = { ...studentForm };
 
@@ -6531,7 +6914,6 @@ const App: React.FC = () => {
       });
       setSelectedStudentForFee(id);
       setFeeClassFilter(s.class || '');
-      showNotification(`Selected: ${s.name} (${s.class})`, 'success');
     }
   };
   const handlePayStudent = (student: Student) => {
@@ -6575,8 +6957,14 @@ const App: React.FC = () => {
       return final;
     } catch (error) { showFirebaseError(error, 'Failed to save fee'); }
   };
-  const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); showNotification(`Selected: ${e.name}`, 'success'); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
-  const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); }     closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
+  const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
+  const handleSaveExpense = async () => {
+    if (!expenseForm.category?.trim()) return showNotification('Category is required', 'error');
+    if (!(Number(expenseForm.amount) > 0)) return showNotification('Amount must be greater than 0', 'error');
+    if (!expenseForm.date?.trim()) return showNotification('Date is required', 'error');
+    if (!expenseForm.paidTo?.trim()) return showNotification('Paid To is required', 'error');
+    try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); }     closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); }
+  };
 
   // ===== Student Deactivation & Refund =====
   const closeDeactModal = () => { setDeactTarget(null); setDeactStep('confirm'); setDeactReason(''); setRefundAmount(''); setRefundDesc(''); };
@@ -6676,32 +7064,44 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteAllStudentAttendance = async () => {
-    if (isReadOnly) { showNotification('Read-only mode: cannot delete', 'error'); return; }
-    const count = attendance.filter(a => a.personType === 'student').length;
-    if (count === 0) { showNotification('No student attendance records to delete', 'error'); return; }
-    if (!confirm(`TEMP TOOL: Delete ALL ${count} student attendance records from the database? This cannot be undone.`)) return;
-    setDeletingStudentAttendance(true);
-    try {
-      const deleted = await deleteAllStudentAttendance();
-      await loadData();
-      showNotification(`Deleted ${deleted} student attendance record(s)`, 'success');
-    } catch (error) {
-      showFirebaseError(error, 'Failed to delete student attendance');
-    } finally {
-      setDeletingStudentAttendance(false);
-    }
-  };
-
   const handleDirectSalaryPay = async (expense: any) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
     try {
+      const month = String(expense.date || expense.salaryMonth || '').substring(0, 7);
+      const pendingSalary = expenses.find(e =>
+        e.employeeId === expense.employeeId &&
+        e.category === 'Salaries' &&
+        e.status !== 'paid' &&
+        ((e.salaryMonth || '') === month || (e.date || '').startsWith(month))
+      );
+      if (pendingSalary?.id) {
+        await updateExpense(pendingSalary.id, {
+          status: 'paid',
+          amount: Number(expense.amount) || pendingSalary.amount,
+          paidTo: expense.paidTo || pendingSalary.paidTo,
+          date: expense.date || pendingSalary.date,
+        });
+        loadData();
+        showNotification(`Salary for ${pendingSalary.paidTo} marked PAID (${pendingSalary.autoId})`, 'success');
+        return;
+      }
       const seq = await getNextSequentialId('expenses');
       const final = { ...expense, autoId: 'EXP-' + String(seq).padStart(3, '0'), status: 'paid' };
       await addExpense(final);
       loadData();
       showNotification(`Salary expense added for ${final.paidTo} — ₹${Number(final.amount || 0).toLocaleString()}`, 'success');
     } catch (error) { showFirebaseError(error, 'Failed to add salary expense'); }
+  };
+  const handleDeleteSalaryExpenses = async (expenses: any[]) => {
+    if (isReadOnly) { showNotification('Read-only mode: cannot mark salary unpaid', 'error'); return; }
+    if (!expenses || expenses.length === 0) return;
+    const label = expenses.length === 1 ? `salary expense ${expenses[0].autoId || ''}` : `${expenses.length} salary expenses`;
+    if (!confirm(`Mark ${label} for ${expenses[0].paidTo || 'employee'} as UNPAID? The record stays in the Expenses page as pending.`)) return;
+    try {
+      for (const e of expenses) await updateExpense(e.id!, { status: 'pending' });
+      await loadData();
+      showNotification('Salary expense marked UNPAID — record kept in Expenses', 'success');
+    } catch (error) { showFirebaseError(error, 'Failed to mark salary expense unpaid'); }
   };
   const handleToggleEmployeeHidden = async (emp: Employee) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot change visibility', 'error'); return; }
@@ -9984,7 +10384,7 @@ const App: React.FC = () => {
               <div className="space-y-1"><label className="text-xs text-cyan-400">Assigned To Type</label><select value={equipmentForm.assignedToType} onChange={e => handleEquipmentAssignedTypeChange(e.target.value as Equipment['assignedToType'])} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="student">Student</option><option value="teacher">Teacher</option><option value="event">Event</option><option value="school">School</option><option value="other">Other</option></select></div>
               {equipmentForm.assignedToType === 'student' && <>
                 <div className="space-y-1"><label className="text-xs text-cyan-400">Select Class</label><select value={equipmentStudentClassFilter} onChange={e => { setEquipmentStudentClassFilter(e.target.value); setEquipmentForm(prev => ({ ...prev, assignedToId: '', assignedToName: '', status: 'Pending' })); }} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Class --</option>{[...new Set(students.filter(s => s.status === 'ACTIVE').map(s => s.class))].filter(Boolean).sort().map(cls => <option key={cls} value={cls}>{cls}</option>)}</select></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Select Student</label><select value={students.find(s => s.autoId === equipmentForm.assignedToId)?.id || ''} onChange={e => handleEquipmentAssigneeChange(e.target.value)} disabled={!equipmentStudentClassFilter} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white disabled:opacity-50"><option value="">{equipmentStudentClassFilter ? '-- Select Student --' : 'Select class first (Pending)'}</option>{students.filter(s => s.status === 'ACTIVE' && s.class === equipmentStudentClassFilter).sort((a, b) => a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.autoId} - {s.name}</option>)}</select></div>
+                <div className="space-y-1"><label className="text-xs text-cyan-400">Select Student</label><select value={students.find(s => s.autoId === equipmentForm.assignedToId)?.id || ''} onChange={e => handleEquipmentAssigneeChange(e.target.value)} disabled={!equipmentStudentClassFilter} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white disabled:opacity-50"><option value="">{equipmentStudentClassFilter ? '-- Select Student --' : 'Select class first (Pending)'}</option>{students.filter(s => s.status === 'ACTIVE' && !isDeactivatedStudent(s) && s.class === equipmentStudentClassFilter).sort((a, b) => a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.autoId} - {s.name}</option>)}</select></div>
               </>}
               {equipmentForm.assignedToType === 'teacher' && <>
                 <div className="space-y-1"><label className="text-xs text-cyan-400">Select Role</label><select value={equipmentEmployeeRoleFilter} onChange={e => { setEquipmentEmployeeRoleFilter(e.target.value); setEquipmentForm(prev => ({ ...prev, assignedToId: '', assignedToName: '', status: 'Pending' })); }} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Role --</option>{[...new Set(employees.filter(e => e.status === 'ACTIVE').map(e => e.role))].filter(Boolean).sort().map(role => <option key={role} value={role}>{role}</option>)}</select></div>
@@ -10069,17 +10469,6 @@ const App: React.FC = () => {
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
           <div className="space-y-6">
-            {!isReadOnly && (
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-red-500/5 border border-red-500/20 rounded-2xl p-4">
-                <div>
-                  <p className="font-semibold text-red-400 flex items-center gap-2"><FiAlertTriangle size={16} /> Temporary Tool</p>
-                  <p className="text-xs text-gray-400 mt-1">{attendance.filter(a => a.personType === 'student').length} student attendance record(s) currently stored. This deletes all student attendance from the database.</p>
-                </div>
-                <button onClick={handleDeleteAllStudentAttendance} disabled={deletingStudentAttendance} className="flex items-center gap-2 bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg shadow-red-500/20 disabled:opacity-50">
-                  <FiTrash2 size={18} />{deletingStudentAttendance ? 'Deleting...' : 'Delete All Student Attendance'}
-                </button>
-              </div>
-            )}
             <AttendanceSection
               employees={employees}
               attendance={attendance}
@@ -10095,6 +10484,7 @@ const App: React.FC = () => {
               logSalarySlipAudit={logSalarySlipAudit}
               updateEmployee={updateEmployee}
               handleDirectSalaryPay={handleDirectSalaryPay}
+              deleteSalaryExpenses={handleDeleteSalaryExpenses}
             />
           </div>
         )}
@@ -10153,8 +10543,13 @@ const App: React.FC = () => {
                       <td className="px-6 py-4 hidden md:table-cell"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{s.package}</span></td><td className="px-6 py-4 font-semibold text-yellow-400">₹{(s.feeAmount || 0).toLocaleString()}</td><td className="px-6 py-4 text-gray-400 hidden lg:table-cell">{s.parentName}</td>
                       <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${s.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{s.status}</span></td>
                       <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => handlePayStudent(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Pay Fee"><FiDollarSign size={18} /></button><button onClick={() => exportStudentIDCard(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download ID Card"><FiFileText size={18} /></button><button onClick={() => openEditModal(s, 'student')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Student"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(s.id!, 'student')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Student"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
-                    </tr>
-                  ))}
+                  </tr>
+              ))}
+                  {filteredStudentsForStudentTab.length === 0 && (
+                    <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                      {students.length === 0 ? 'No students found. If you expect data, make sure the backend is running, then click Refresh.' : 'No students match your search or filter.'}
+                    </td></tr>
+                  )}
                 </tbody>
               </table></div>
             </div>
@@ -10352,9 +10747,15 @@ const App: React.FC = () => {
                     <td className="px-6 py-4 font-mono text-cyan-400">{f.autoId}</td><td className="px-6 py-4 font-semibold">{f.studentName}</td><td className="px-6 py-4 font-semibold">₹{f.amount.toLocaleString()}</td><td className="px-6 py-4">{f.type}</td><td className="px-6 py-4 text-gray-400">{f.description || '-'}</td><td className="px-6 py-4 text-gray-400">{f.dueDate || '-'}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${getEffectiveFeeStatus(f) === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : getEffectiveFeeStatus(f) === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{getEffectiveFeeStatus(f)}</span></td>
                   <td className="px-6 py-4">{f.billUrl && <button onClick={() => previewBill(f.billUrl!)} className="text-cyan-400 hover:text-cyan-300"><FiImage size={18} /></button>}</td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => exportFeeInvoice(f)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download Invoice"><FiFileText size={18} /></button><button onClick={() => openEditModal(f, 'fee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(f.id!, 'fee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => exportFeeInvoice(f)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download Invoice"><FiFileText size={18} /></button><button onClick={() => openEditModal(f, 'fee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Fee"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(f.id!, 'fee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Fee"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
-              ))}</tbody>
+              ))}
+              {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length === 0 && (
+                <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                  {fees.length === 0 ? 'No fees found. If you expect data, make sure the backend is running, then click Refresh.' : 'No fees match your search or filter.'}
+                </td></tr>
+              )}
+              </tbody>
             </table></div></div>
             {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFees ? 'Showing all' : `Showing 5 of ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length}`}</p><button onClick={() => setShowAllFees(!showAllFees)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFees ? 'Show Less' : `View All ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length}`}</button></div>}
           </div>
@@ -10409,7 +10810,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col gap-3">
               <div className="relative w-full"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search by name, ID, or role..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}{!isReadOnly && <button onClick={() => setShowHiddenEmployees(v => !v)} className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border transition ${showHiddenEmployees ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 hover:border-cyan-500'}`}><FiEye size={16} />{showHiddenEmployees ? 'Hide Hidden' : `Show Hidden (${employees.filter(e => e.hidden).length})`}</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr   className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(visibleEmployeesForPage, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
+              <div className="flex flex-wrap gap-2 items-center">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Employee</button>}{!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}{!isReadOnly && <button onClick={() => runSalaryAutoRefresh(true)} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiRefreshCw size={16} />Salary Refresh</button>}<button onClick={() => exportEmployeeSalarySlip()} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-yellow-500/20"><FiDollarSign size={16} />Salary Slips (PDF)</button>{!isReadOnly && <button onClick={() => { resetModalSubViews(); setShowOfferLetterSettings(true); setShowModal(true); }} className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-purple-500/20"><FiFileText size={16} />Offer Letter Settings</button>}{!isReadOnly && <button onClick={() => setShowHiddenEmployees(v => !v)} className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border transition ${showHiddenEmployees ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 hover:border-cyan-500'}`}><FiEye size={16} />{showHiddenEmployees ? 'Hide Hidden' : `Show Hidden (${employees.filter(e => e.hidden).length})`}</button>}<div className="relative"><button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg transition"><FiCalendar size={16} />{selectedMonths.length === 1 ? selectedMonths[0] : selectedMonths.length + ' months'}</button>{showMonthPicker && <div className="absolute top-full left-0 mt-1 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 z-50 shadow-lg min-w-[200px]">{Array.from({length: 6}, (_, i) => { const d = new Date(); d.setMonth(d.getMonth() - i); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); return (<label key={v} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.includes(v)} onChange={() => { setSelectedMonths(prev => prev.includes(v) ? prev.filter(m => m !== v) : [...prev, v].sort()); }} className="accent-cyan-500" />{mName}</label>); })}<hr   className="border-gray-800 my-1" /><label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer text-sm"><input type="checkbox" checked={selectedMonths.length === 0} onChange={() => setSelectedMonths([])} className="accent-cyan-500" />Clear all</label></div>}</div><button onClick={() => exportToExcel(visibleEmployeesForPage, 'Employees')} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20"><FiDownload size={16} />Excel</button><button onClick={() => exportEmployeeReportPDF()} className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 text-white px-4 py-3 rounded-xl text-sm font-semibold shadow-lg shadow-rose-500/20"><FiFileText size={16} />PDF</button></div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Name</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Role</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden xl:table-cell">Dept</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Net Salary</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Deduction</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Phone</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Paid (Expenses)</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -10530,9 +10931,15 @@ const App: React.FC = () => {
                   <td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-semibold ${eq.condition === 'New' || eq.condition === 'Good' ? 'bg-emerald-500/20 text-emerald-400' : eq.condition === 'Repair Needed' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{eq.condition}</span></td>
                   <td className="px-6 py-4 font-semibold text-yellow-400">₹{((eq.value || 0) * (eq.quantity || 1)).toLocaleString()}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${eq.status === 'Available' ? 'bg-cyan-500/20 text-cyan-400' : eq.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400' : eq.status === 'Pending' || ((eq.assignedToType === 'student' || eq.assignedToType === 'teacher') && !eq.assignedToId) ? 'bg-yellow-500/20 text-yellow-400' : eq.status === 'In Repair' ? 'bg-orange-500/20 text-orange-400' : 'bg-gray-500/20 text-gray-400'}`}>{(eq.status === 'Pending' || ((eq.assignedToType === 'student' || eq.assignedToType === 'teacher') && !eq.assignedToId)) ? 'Pending' : eq.status}</span></td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(eq, 'equipment')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(eq.id!, 'equipment')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(eq, 'equipment')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Equipment"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(eq.id!, 'equipment')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Equipment"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
-              ); })}</tbody>
+              ); })}
+              {equipments.filter(eq => eq.name.toLowerCase().includes(searchTerm.toLowerCase()) || eq.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || eq.category.toLowerCase().includes(searchTerm.toLowerCase()) || (eq.assignedToName || '').toLowerCase().includes(searchTerm.toLowerCase()) || eq.assignedToType.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                <tr><td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                  {equipments.length === 0 ? 'No equipments found. If you expect data, make sure the backend is running, then click Refresh.' : 'No equipments match your search.'}
+                </td></tr>
+              )}
+              </tbody>
             </table></div></div>
           </div>
         )}
@@ -10547,7 +10954,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search description or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
-              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportExpenseReportPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button></div>
+              <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportExpenseReportPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>{!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}</div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Category</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid To</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
@@ -10557,9 +10964,15 @@ const App: React.FC = () => {
                   <td className="px-6 py-4">{e.paidTo}{e.employeeId && <span className="ml-2 text-xs text-cyan-400">🔗 Linked</span>}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.salaryMonth ? <span>{e.salaryMonth}{e.date && <span className="ml-1 text-xs text-gray-600">({e.date})</span>}</span> : e.date}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${e.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{e.status}</span></td>
                   <td className="px-6 py-4">{e.billUrl && <button onClick={() => previewBill(e.billUrl!)} className="text-cyan-400 hover:text-cyan-300"><FiImage size={18} /></button>}</td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'expense')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(e.id!, 'expense')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'expense')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Expense"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(e.id!, 'expense')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Expense"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
-              ))}</tbody>
+              ))}
+              {expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                <tr><td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                  {expenses.length === 0 ? 'No expenses found. If you expect data, make sure the backend is running, then click Refresh.' : 'No expenses match your search.'}
+                </td></tr>
+              )}
+              </tbody>
             </table></div></div>
             {expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllExpenses ? 'Showing all' : `Showing 5 of ${expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllExpenses(!showAllExpenses)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllExpenses ? 'Show Less' : `View All ${expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
           </div>
@@ -10698,9 +11111,9 @@ const App: React.FC = () => {
                                     </td>
                                   );
                                 })}
-                              </tr>
-                            ))}
-                          </tbody>
+                  </tr>
+              ))}
+              </tbody>
                         </table>
                       </div>
                     </div>
@@ -10960,6 +11373,8 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [saveProgress, setSaveProgress] = useState<{ current: number; total: number } | null>(null);
   const [secondarySaving, setSecondarySaving] = useState(false);
+  const [feeStudentFilter, setFeeStudentFilter] = useState('');
+  const [insertPos, setInsertPos] = useState('');
 
   const getSource = () => {
     switch (entityType) {
@@ -10972,7 +11387,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       case 'employees':
         return employees.map(e => ({ firestoreId: e.id || '', autoId: e.autoId, name: e.name }));
       case 'fees':
-        return fees.map(f => ({ firestoreId: f.id || '', autoId: f.autoId, name: f.studentName || f.autoId }));
+        return fees.map(f => ({ firestoreId: f.id || '', autoId: f.autoId, name: f.studentName || f.autoId, studentId: f.studentId || '' }));
       case 'expenses':
         return expenses.map(e => ({ firestoreId: e.id || '', autoId: e.autoId, name: e.paidTo || e.description || e.autoId }));
       case 'equipments':
@@ -10986,10 +11401,19 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
     setFilterText('');
     setFilterClass('');
     setSelectedIds(new Set());
+    setFeeStudentFilter('');
+    setInsertPos('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, students, employees, fees, expenses, equipments]);
 
   const filterable = entityType === 'students';
+  const selectedFeeStudent = feeStudentFilter ? students.find(s => s.autoId === feeStudentFilter) : undefined;
+  const feeStudentMatches = (item: any) =>
+    selectedFeeStudent != null &&
+    (item.studentId === selectedFeeStudent.autoId || item.name === selectedFeeStudent.name);
+
+  const showCheckboxes = filterable || (entityType === 'fees' && !!feeStudentFilter);
+
   const displayItems = filterable
     ? items.filter(item => {
         const matchText = !filterText ||
@@ -11000,7 +11424,9 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
         const matchClass = !filterClass || item.class === filterClass;
         return matchText && matchClass;
       })
-    : items;
+    : (entityType === 'fees' && feeStudentFilter
+        ? items.filter(feeStudentMatches)
+        : items);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -11023,9 +11449,13 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       entityType === 'fees' ? 'FEE-' :
       entityType === 'expenses' ? 'EXP-' : 'EQP-';
     const next = [...items];
+    let seq = 0;
     for (let i = 0; i < next.length; i++) {
       if (selectedIds.has(next[i].firestoreId)) {
-        next[i] = { ...next[i], autoId: `${prefix}${i + 1}` };
+        seq++;
+        next[i] = { ...next[i], autoId: entityType === 'fees' && feeStudentFilter
+          ? `${prefix}${String(seq).padStart(3, '0')}`
+          : `${prefix}${i + 1}` };
       }
     }
     setItems(next);
@@ -11064,10 +11494,31 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       entityType === 'employees' ? 'EMP-' :
       entityType === 'fees' ? 'FEE-' :
       entityType === 'expenses' ? 'EXP-' : 'EQP-';
+    if (entityType === 'fees') {
+      const next = items.map((item, i) => ({ ...item, autoId: `${prefix}${String(i + 1).padStart(3, '0')}` }));
+      setItems(next);
+      setDirty(true);
+      return;
+    }
     const total = items.length;
     const next = items.map((item, i) => ({ ...item, autoId: `${prefix}${total - i}` }));
     setItems(next);
     setDirty(true);
+  };
+
+  const insertSelectedStudentAt = (afterRow: number) => {
+    if (entityType !== 'fees' || !selectedFeeStudent) return;
+    const prefix = 'FEE-';
+    const matchIds = new Set(items.filter(feeStudentMatches).map(m => m.firestoreId));
+    const block = items.filter(it => matchIds.has(it.firestoreId));
+    const rest = items.filter(it => !matchIds.has(it.firestoreId));
+    const target = Math.max(0, Math.min(afterRow, rest.length));
+    const next = [...rest.slice(0, target), ...block, ...rest.slice(target)]
+      .map((it, i) => ({ ...it, autoId: `${prefix}${String(i + 1).padStart(3, '0')}` }));
+    setItems(next);
+    setDirty(true);
+    setInsertPos('');
+    showNotification(`Inserted ${block.length} fee record(s) after row ${target} and renumbered FEE-001 upward`, 'success');
   };
 
   const sortByAutoId = () => {
@@ -11227,7 +11678,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       )}
 
       <div className="flex items-center gap-3 text-sm flex-wrap">
-        <span className="text-gray-400">{items.length} record(s)</span>
+        <span className="text-gray-400">{feeStudentFilter ? displayItems.length + ' of ' + items.length : items.length} record(s)</span>
         {dirty && <span className="flex items-center gap-1 text-yellow-400"><FiAlertTriangle size={14} />Unsaved changes</span>}
         {filterable && (
           <>
@@ -11244,6 +11695,38 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
             </div>
           </>
         )}
+        {entityType === 'fees' && (
+          <div className="relative flex-1 max-w-xs">
+            <FiUsers size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+            <select value={feeStudentFilter}
+              onChange={e => { setFeeStudentFilter(e.target.value); setSelectedIds(new Set()); setInsertPos(''); }}
+              className="w-full p-2 pl-8 bg-[#1E1E1E] border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500">
+              <option value="">All Students (whole Fees list)</option>
+              {students.filter(s => s.autoId && (s.status === 'ACTIVE' || fees.some(f => f.studentId === s.autoId) || fees.some(f => f.studentName === s.name)))
+                .map(s => (
+                  <option key={s.autoId} value={s.autoId}>{s.autoId} — {s.name}</option>
+                ))}
+            </select>
+          </div>
+        )}
+        {entityType === 'fees' && feeStudentFilter && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-gray-400 text-xs">Insert this student after row #</span>
+            <input type="number" min={0} max={items.length} value={insertPos}
+              onChange={e => setInsertPos(e.target.value)}
+              placeholder="0"
+              className="w-20 p-2 bg-[#1E1E1E] border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500" />
+            <button onClick={() => insertSelectedStudentAt(insertPos ? Math.max(0, parseInt(insertPos) || 0) : 0)}
+              disabled={isReadOnly}
+              className="px-3 py-2 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-teal-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+              <FiCheck size={14} />Insert &amp; Renumber
+            </button>
+            <button onClick={() => insertSelectedStudentAt(0)} disabled={isReadOnly}
+              className="px-3 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-teal-500 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">To Start</button>
+            <button onClick={() => insertSelectedStudentAt(items.length)} disabled={isReadOnly}
+              className="px-3 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-teal-500 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">To End</button>
+          </div>
+        )}
       </div>
 
       <div className="bg-[#1E1E1E] border border-gray-800 rounded-2xl overflow-hidden">
@@ -11251,7 +11734,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
           <table className="w-full">
             <thead>
               <tr className="bg-gray-800/50">
-                {filterable && (
+                {showCheckboxes && (
                   <th className="px-2 py-3 w-10">
                     <input type="checkbox" checked={displayItems.length > 0 && displayItems.every(i => selectedIds.has(i.firestoreId))}
                       onChange={toggleSelectAll} className="accent-cyan-500 w-4 h-4 cursor-pointer" />
@@ -11269,8 +11752,8 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={entityType === 'students' ? 7 : 4} className="px-4 py-12 text-center text-gray-500">No records found.</td></tr>
-              ) : displayItems.map((item, i) => (
+                <tr><td colSpan={showCheckboxes ? (entityType === 'students' ? 7 : 5) : 4} className="px-4 py-12 text-center text-gray-500">No records found.</td></tr>
+              ) : displayItems.map((item, i) => { const ri = items.indexOf(item); return (
                 <tr key={item.firestoreId || i}
                   draggable
                   onDragStart={() => handleDragStart(items.indexOf(item))}
@@ -11279,7 +11762,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
                   className={`border-t border-gray-800 transition cursor-grab active:cursor-grabbing ${
                     selectedIds.has(item.firestoreId) ? 'bg-cyan-500/5' : 'hover:bg-gray-800/30'
                   } ${dragIndex === items.indexOf(item) ? 'opacity-50' : ''}`}>
-                  {filterable && (
+                  {showCheckboxes && (
                     <td className="px-2 py-3">
                       <input type="checkbox" checked={selectedIds.has(item.firestoreId)}
                         onChange={() => toggleSelect(item.firestoreId)} className="accent-cyan-500 w-4 h-4 cursor-pointer" />
@@ -11288,20 +11771,20 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
                   <td className="px-4 py-3 text-gray-400 font-mono text-sm">{items.indexOf(item) + 1}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1">
-                      <button onClick={() => moveItem(i, -1)} disabled={i === 0}
+                      <button onClick={() => moveItem(ri, -1)} disabled={ri === 0}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded disabled:opacity-20 disabled:cursor-not-allowed">
                         <FiChevronUp size={16} />
                       </button>
-                      <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1}
+                      <button onClick={() => moveItem(ri, 1)} disabled={ri === items.length - 1}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded disabled:opacity-20 disabled:cursor-not-allowed">
                         <FiChevronDown size={16} />
                       </button>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <input value={item.autoId} onChange={e => updateField(i, 'autoId', e.target.value)}
+                    <input value={item.autoId} onChange={e => updateField(ri, 'autoId', e.target.value)}
                       className={`w-full p-2 bg-gray-800 rounded-lg border text-white font-mono text-sm focus:outline-none ${
-                        items.some((x: any, xi: number) => xi !== i && x.autoId === item.autoId && item.autoId !== '')
+                        items.some((x: any, xi: number) => xi !== ri && x.autoId === item.autoId && item.autoId !== '')
                           ? 'border-red-500 text-red-400'
                           : 'border-gray-700 focus:border-cyan-500'
                       }`} />
@@ -11309,21 +11792,21 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
                   {entityType === 'students' && (
                     <>
                       <td className="px-4 py-3">
-                        <select value={item.class || ''} onChange={e => updateField(i, 'class', e.target.value)}
+                        <select value={item.class || ''} onChange={e => updateField(ri, 'class', e.target.value)}
                           className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:outline-none focus:border-cyan-500">
                           <option value="">— Select Class —</option>
                           {allClasses.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </td>
                       <td className="px-4 py-3">
-                        <input value={item.rollNumber} onChange={e => updateField(i, 'rollNumber', e.target.value)}
+                        <input value={item.rollNumber} onChange={e => updateField(ri, 'rollNumber', e.target.value)}
                           className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:outline-none focus:border-cyan-500" />
                       </td>
                     </>
                   )}
                   <td className="px-4 py-3 text-white text-sm">{item.name || '—'}</td>
-                </tr>
-              ))}
+                 </tr>
+              ); })}
             </tbody>
           </table>
         </div>
@@ -11332,7 +11815,11 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
       <p className="text-xs text-gray-500">
         Reorder items using the arrow buttons, then click <strong>Auto Re-sequence</strong> to assign sequential AUTO IDs,
         or edit any field directly. For students, changing the class or roll number will be reflected across Fees by Student
-        and Fees &amp; Billing after saving. Click <strong>Save All Changes</strong> to persist to the database.
+        and Fees &amp; Billing after saving. For <strong>Fees</strong>, pick any student (even one with a single entry) from the
+        dropdown; their fee rows appear as one block. Use <strong>Insert this student after row #</strong> (or To Start / To End) to
+        place the block anywhere in the list — the fees are then auto-renumbered from <strong>FEE-001</strong> upward, so whatever
+        entry sits after <strong>FEE-001</strong> becomes <strong>FEE-002</strong>, and so on. The student&apos;s own data and AUTO ID stay untouched.
+        Click <strong>Save All Changes</strong> to persist to the database.
       </p>
     </div>
   );

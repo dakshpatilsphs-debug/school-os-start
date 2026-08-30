@@ -2,7 +2,7 @@ export interface Student {
   id?: string; autoId: string; name: string; rollNumber: string; class: string;
   parentName: string; parentPhone: string; email: string; address: string;
   dateOfBirth: string; gender: string; admissionDate: string; status: string;
-  package: string; feeAmount: number;
+  package: string; feeAmount: number; emiMonths?: number;
   submittedDocuments?: string[];
 
   packageAmount?: number;
@@ -33,6 +33,8 @@ export interface Fee {
   paymentAmount?: number;
   balanceAmount?: number;
   secondaryAutoId?: string;
+  installmentMonths?: number;
+  installmentIndex?: number;
 }
 export interface Expense {
   id?: string; autoId: string; category: string; amount: number; description: string;
@@ -89,8 +91,20 @@ export interface Holiday {
 
 export const SchoolLogo = ({ size = 26 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 3L1 9l11 6 9-4.91V17h2V9L12 3z" fill="white" />
-    <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z" fill="white" opacity="0.7" />
+    <defs>
+      <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="white" stopOpacity="0.95" />
+        <stop offset="100%" stopColor="white" stopOpacity="0.75" />
+      </linearGradient>
+    </defs>
+    {/* Shield background */}
+    <path d="M12 2.2L3.2 6.8V12.5C3.2 16.1 6.1 19.4 12 21.5C17.9 19.4 20.8 16.1 20.8 12.5V6.8L12 2.2Z" fill="url(#logoGrad)" fillOpacity="0.18" stroke="white" strokeOpacity="0.85" strokeWidth="1.1" />
+    {/* Book */}
+    <path d="M7.2 9.2C7.2 9.2 9.0 8.1 12 8.1C15 8.1 16.8 9.2 16.8 9.2V15.2C16.8 15.2 15 14.1 12 14.1C9 14.1 7.2 15.2 7.2 15.2V9.2Z" fill="white" fillOpacity="0.96" />
+    <path d="M12 8.1V14.1" stroke="white" strokeOpacity="0.35" strokeWidth="0.7" />
+    {/* Graduation cap */}
+    <path d="M12 4.8L6.2 7.6L12 10.4L17.8 7.6L12 4.8Z" fill="white" />
+    <path d="M6.2 7.6V9.1L12 11.9L17.8 9.1V7.6" stroke="white" strokeOpacity="0.9" strokeWidth="0.7" fill="none" strokeLinejoin="round" />
   </svg>
 );
 // ===== Schedule/Timetable Types =====

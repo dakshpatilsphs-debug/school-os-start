@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:admin": "vite build --mode admin",
     "preview": "vite preview"
   },
   "dependencies": {
     "clsx": "2.1.1",
     "firebase": "^12.15.0",
+    "framer-motion": "^12.43.0",
     "git": "^0.1.5",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",

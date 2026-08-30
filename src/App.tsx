@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   FiUsers, FiUser, FiDollarSign, FiTrendingDown, FiBarChart2, FiPlus, FiEdit2,
   FiTrash2, FiDownload, FiUpload, FiFileText, FiX, FiCheck, FiAlertCircle,
-  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart, FiGrid, FiShare2, FiLock, FiEye, FiEyeOff, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu, FiSave, FiTag, FiMinus, FiSun, FiMoon
+  FiSearch, FiRefreshCw, FiImage, FiCalendar, FiTrendingUp, FiTrendingDown as FiTrendDown, FiSettings, FiBriefcase, FiPieChart,   FiGrid, FiShare2, FiLock, FiEye, FiEyeOff, FiClock, FiAlertTriangle, FiChevronUp, FiChevronDown, FiArrowUp, FiCpu, FiSave, FiTag, FiMinus, FiSun, FiMoon, FiSend
 } from 'react-icons/fi';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -32,13 +32,27 @@ import { AttendanceSection } from './Attendance';
 import { ScheduleSection } from './Schedule';
 import type { SalarySlipData } from './salarySlipTypes';
 import AIAssistant from './components/AIAssistant';
+import { SmsSection } from './SmsSection';
+import { motion, AnimatePresence } from 'framer-motion';
+import { translations, t as tr } from './i18n';
 
-type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai';
+type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai' | 'sms';
 
 import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered } from './clUtils';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const isAdminMode = (import.meta as any).env?.VITE_ADMIN_MODE === 'true';
+  const allowedAdminTabs: Tab[] = ['reports', 'studentlist', 'feesbystudent', 'dashboard'];
+  const [activeTab, _setActiveTab] = useState<Tab>(isAdminMode ? 'reports' : 'dashboard');
+  const setActiveTab = useCallback((tab: Tab) => {
+    if (isAdminMode && !(allowedAdminTabs as string[]).includes(tab)) return;
+    _setActiveTab(tab);
+  }, [isAdminMode]);
+  useEffect(() => {
+    if (isAdminMode && !(allowedAdminTabs as string[]).includes(activeTab)) {
+      _setActiveTab('reports');
+    }
+  }, [isAdminMode, activeTab]);
   const [students, setStudents] = useState<Student[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -52,7 +66,7 @@ const App: React.FC = () => {
   const [docEditState, setDocEditState] = useState<Record<string, string[]>>({});
   const [docEditSaving, setDocEditSaving] = useState(false);
   const [importProgress, setImportProgress] = useState<{ active: boolean; current: number; total: number; status: string; success: number; failed: number }>({ active: false, current: 0, total: 0, status: '', success: 0, failed: 0 });
-  const isReadOnly = false; // Read-only mode removed - always full access
+  const isReadOnly = isAdminMode; // admin build is read-only
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<'add' | 'edit'>('add');
   const [currentRecord, setCurrentRecord] = useState<any>(null);
@@ -110,6 +124,8 @@ const App: React.FC = () => {
       offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.',
       offerSignatory: 'Principal / Administrator',
       offerAck: 'I acknowledge and accept the terms and conditions mentioned above.',
+      smsToken: '681f0d5d-024e-452d-bbbc-6595b974c478',
+      smsEndpoint: '/smsgw',
     };
     if (saved) {
       const parsed = JSON.parse(saved);
@@ -118,7 +134,7 @@ const App: React.FC = () => {
     return defaults;
   });
 
-  const [studentForm, setStudentForm] = useState<Student>({ autoId: 'STU-AUTO', name: '', rollNumber: '', class: '', parentName: '', parentPhone: '', email: '', address: '', dateOfBirth: '', gender: 'MALE', admissionDate: '', status: 'ACTIVE', package: 'Basic', feeAmount: 16000, submittedDocuments: [] });
+  const [studentForm, setStudentForm] = useState<Student>({ autoId: 'STU-AUTO', name: '', rollNumber: '', class: '', parentName: '', parentPhone: '', email: '', address: '', dateOfBirth: '', gender: 'MALE', admissionDate: '', status: 'ACTIVE', package: 'Basic', feeAmount: 16000, emiMonths: 1, submittedDocuments: [] });
   const [classes, setClasses] = useState<string[]>(() => { const s = localStorage.getItem('schoolClasses'); return s ? JSON.parse(s) : ['NUR.', 'JR.KG', 'SR.KG', '1 ST',"2 ND","3 RD","4 TH",]; });
   const [documentOptions, setDocumentOptions] = useState<string[]>(() => { const s = localStorage.getItem('schoolDocumentOptions'); return s ? JSON.parse(s) : ['Birth Certificate', 'Aadhaar Card', 'XEROX BIRTH CERTIFICATE', 'PHOTO', 'PARENT Photo', 'Parent ID Proof','LEAVING CERTIFICATE','ADDMISSION FORM']; });
   const [showDocumentMgmt, setShowDocumentMgmt] = useState(false);
@@ -152,6 +168,10 @@ const App: React.FC = () => {
   const [deductMonth, setDeductMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const [deductAmount, setDeductAmount] = useState('');
   const [uiTheme, setUiTheme] = useState<'blackblue' | 'wrb'>(() => (localStorage.getItem('uiTheme') === 'wrb' ? 'wrb' : 'blackblue'));
+  const [lang, setLang] = useState<'en' | 'hi' | 'mr'>(() => {
+    const v = localStorage.getItem('appLang');
+    return v === 'hi' || v === 'mr' ? v : 'en';
+  });
   const [summaryYear, setSummaryYear] = useState<number>(new Date().getFullYear());
   const [reportFees, setReportFees] = useState<Fee[]>([]);
   const [reportExpenses, setReportExpenses] = useState<Expense[]>([]);
@@ -160,13 +180,18 @@ const App: React.FC = () => {
     document.documentElement.setAttribute('data-theme', uiTheme);
     localStorage.setItem('uiTheme', uiTheme);
   }, [uiTheme]);
+  useEffect(() => {
+    document.documentElement.setAttribute('lang', lang);
+    localStorage.setItem('appLang', lang);
+  }, [lang]);
 
-  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '', secondaryAutoId: '' } as any);
+  const [feeForm, setFeeForm] = useState<Fee>({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '', secondaryAutoId: '', installmentMonths: 1 } as any);
   const [selectedStudentForFee, setSelectedStudentForFee] = useState('');
   const [feeClassFilter, setFeeClassFilter] = useState('');
   const [forceFeeForm, setForceFeeForm] = useState(false);
 
   const [expenseForm, setExpenseForm] = useState<Expense>({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' });
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('');
   const [employeeForm, setEmployeeForm] = useState<Employee>({ autoId: generateAutoId('M'), name: '', role: 'TEACHER', phone: '', email: '', address: '', salary: 0, joinDate: '', status: 'ACTIVE', department: '', bankAccount: '', panTaxId: '', salaryAutoRefresh: false, salaryRefreshDay: 1, inactiveDate: '', otherDeduction: 0 } as any);
   const [equipmentForm, setEquipmentForm] = useState<Equipment>({ autoId: generateAutoId('Q'), name: '', category: 'Furniture', assignedToType: 'school', assignedToId: '', assignedToName: 'School', quantity: 1, condition: 'Good', purchaseDate: '', value: 0, status: 'Pending', notes: '' });
   const [equipmentPersonTypeFilter, setEquipmentPersonTypeFilter] = useState<'all' | 'student' | 'teacher'>('all');
@@ -638,6 +663,41 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('schoolPackages', JSON.stringify(packages)); }, [packages]);
   useEffect(() => { localStorage.setItem('schoolDocumentOptions', JSON.stringify(documentOptions)); }, [documentOptions]);
   useEffect(() => { localStorage.setItem('schoolSettings', JSON.stringify(schoolSettings)); }, [schoolSettings]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getSmsSettings } = await import('./firebase');
+        const remote = await getSmsSettings();
+        if (!cancelled && remote && (remote.smsToken || remote.smsEndpoint)) {
+          setSchoolSettings(prev => {
+            const merged: any = { ...prev };
+            let changed = false;
+            if (remote.smsToken && remote.smsToken !== prev.smsToken) { merged.smsToken = remote.smsToken; changed = true; }
+            if (remote.smsEndpoint && remote.smsEndpoint !== prev.smsEndpoint) { merged.smsEndpoint = remote.smsEndpoint; changed = true; }
+            if (changed) try { localStorage.setItem('smsToken', remote.smsToken); } catch {}
+            return changed ? merged : prev;
+          });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const prevSmsRef = React.useRef<{ smsToken?: string; smsEndpoint?: string }>({});
+  useEffect(() => {
+    const cur = { smsToken: (schoolSettings as any).smsToken, smsEndpoint: (schoolSettings as any).smsEndpoint };
+    const prev = prevSmsRef.current;
+    if (prev.smsToken === cur.smsToken && prev.smsEndpoint === cur.smsEndpoint) return;
+    prevSmsRef.current = cur;
+    if (!cur.smsToken && !cur.smsEndpoint) return;
+    (async () => {
+      try {
+        const { saveSmsSettings } = await import('./firebase');
+        await saveSmsSettings({ smsToken: cur.smsToken || '', smsEndpoint: cur.smsEndpoint || '/smsgw' });
+        try { if (cur.smsToken) localStorage.setItem('smsToken', cur.smsToken); } catch {}
+      } catch {}
+    })();
+  }, [(schoolSettings as any).smsToken, (schoolSettings as any).smsEndpoint]);
   useEffect(() => { setShowAllStudents(false); setShowAllFees(false); setShowAllFeesByStudent(false); setShowAllExpenses(false); setShowAllEmployees(false); }, [searchTerm]);
 
   // Filter locally loaded fees/expenses by year (dates stored as YYYY-MM-DD strings)
@@ -762,8 +822,9 @@ const App: React.FC = () => {
       status: 'ACTIVE',
       package: 'Basic',
       feeAmount: 16000,
+      emiMonths: 1,
       submittedDocuments: [],
-    });
+    } as any);
   };
 
   const handleAutoCaps = (e: any, field: string, setter: any) => { let v = e.target.value; if (['name', 'class', 'parentName', 'gender', 'status', 'role'].includes(field)) v = v.toUpperCase(); setter((prev: any) => ({ ...prev, [field]: v })); };
@@ -789,6 +850,13 @@ const App: React.FC = () => {
   }, [resetModalSubViews]);
 
   const handleSaveStudent = async (forceAdd = false) => {
+    if (!studentForm.name.trim()) return showNotification('Student Name is required', 'error');
+    if (!studentForm.class.trim()) return showNotification('Class is required', 'error');
+    if (!studentForm.parentName.trim()) return showNotification('Parent / Guardian name is required', 'error');
+    if (!studentForm.parentPhone.trim()) return showNotification('Parent phone is required', 'error');
+    if (!(Number(studentForm.feeAmount) > 0)) return showNotification('Fee Amount must be greater than 0', 'error');
+    const emi = Number((studentForm as any).emiMonths || 1);
+    if (emi < 1 || emi > 11) return showNotification('EMI months must be between 1 and 11', 'error');
     try {
       const final: Student = { ...studentForm };
 
@@ -861,7 +929,6 @@ const App: React.FC = () => {
       });
       setSelectedStudentForFee(id);
       setFeeClassFilter(s.class || '');
-      showNotification(`Selected: ${s.name} (${s.class})`, 'success');
     }
   };
   const handlePayStudent = (student: Student) => {
@@ -884,6 +951,8 @@ const App: React.FC = () => {
   };
   const handleSaveFee = async () => {
     if (!feeForm.studentId) { showNotification('Please select a student', 'error'); return; }
+    const instMonthsRaw = Number((feeForm as any).installmentMonths || 1);
+    if (instMonthsRaw < 1 || instMonthsRaw > 11) { showNotification('Installment months must be between 1 and 11', 'error'); return; }
     try {
       let final: any = { ...feeForm };
       const selectedStudent = students.find(s => s.autoId === final.studentId);
@@ -895,18 +964,43 @@ const App: React.FC = () => {
       const payableAmount = calculated.amount;
       const paymentAmount = Math.min(Math.max(Number(final.paymentAmount ?? final.amount ?? payableAmount), 0), payableAmount);
       const balanceAmount = Math.max(payableAmount - paymentAmount, 0);
-      final = { ...final, discountType, discountValue, applyDiscount, ...calculated, originalAmount, payableAmount, paymentAmount, amount: paymentAmount, balanceAmount, status: paymentAmount > 0 ? 'paid' : final.status, secondaryAutoId: selectedStudent?.secondaryAutoId || feeForm.secondaryAutoId || '' };
+      final = { ...final, discountType, discountValue, applyDiscount, ...calculated, originalAmount, payableAmount, paymentAmount, amount: paymentAmount, balanceAmount, status: paymentAmount > 0 ? 'paid' : final.status, secondaryAutoId: selectedStudent?.secondaryAutoId || feeForm.secondaryAutoId || '', installmentMonths: instMonthsRaw };
 
-      if (modalType === 'edit' && currentRecord?.id) await updateFee(currentRecord.id, final);
-      else { const seq = await getNextSequentialId('fees'); final.autoId = 'FEE-' + String(seq).padStart(3, '0'); await addFee(final); }
+      const addMonths = (dateStr: string, add: number) => {
+        if (!dateStr) return '';
+        const d = new Date(dateStr + 'T12:00:00');
+        if (isNaN(d.getTime())) return dateStr;
+        d.setMonth(d.getMonth() + add);
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      };
+
+      if (modalType === 'edit' && currentRecord?.id) {
+        await updateFee(currentRecord.id, final);
+      } else if (instMonthsRaw > 1) {
+        const per = Math.floor(payableAmount / instMonthsRaw);
+        const rem = payableAmount - per * instMonthsRaw;
+        for (let i = 0; i < instMonthsRaw; i++) {
+          const amt = per + (i === instMonthsRaw - 1 ? rem : 0);
+          const inst: any = { ...final, amount: amt, paymentAmount: i===0 ? paymentAmount : 0, balanceAmount: i===0 ? Math.max(amt - paymentAmount,0) : amt, payableAmount: amt, installmentIndex: i+1, type: `${final.type} (${i+1}/${instMonthsRaw})`, dueDate: addMonths(final.dueDate, i), description: final.description ? `${final.description} — Installment ${i+1}/${instMonthsRaw}` : `Installment ${i+1}/${instMonthsRaw}`, status: i===0 && paymentAmount>0 ? 'paid' : 'pending' };
+          const seq = await getNextSequentialId('fees');
+          inst.autoId = 'FEE-' + String(seq).padStart(3, '0');
+          await addFee(inst);
+        }
+      } else { const seq = await getNextSequentialId('fees'); final.autoId = 'FEE-' + String(seq).padStart(3, '0'); await addFee(final); }
       closeModal();
-      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '', secondaryAutoId: '' } as any);
-      setBillFile(null); setSelectedStudentForFee(''); setFeeClassFilter(''); await loadData(); showNotification('Fee saved successfully', 'success');
+      setFeeForm({ autoId: generateAutoId('F'), studentId: '', studentName: '', originalAmount: 0, applyDiscount: false, discountType: 'amount', discountValue: 0, discountAmount: 0, payableAmount: 0, paymentAmount: 0, balanceAmount: 0, amount: 0, type: 'Tuition Fee', dueDate: '', paidDate: '', status: 'paid', description: '', billUrl: '', secondaryAutoId: '', installmentMonths: 1 } as any);
+      setBillFile(null); setSelectedStudentForFee(''); setFeeClassFilter(''); await loadData(); showNotification(instMonthsRaw > 1 && modalType !== 'edit' ? `Created ${instMonthsRaw} installments` : 'Fee saved successfully', 'success');
       return final;
     } catch (error) { showFirebaseError(error, 'Failed to save fee'); }
   };
-  const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); showNotification(`Selected: ${e.name}`, 'success'); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
-  const handleSaveExpense = async () => { try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); }     closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); } };
+  const handleEmployeeSelectionForExpense = (id: string) => { const e = employees.find(x => x.id === id); if (e) { setExpenseForm(prev => ({ ...prev, employeeId: e.autoId, paidTo: e.name, category: 'Salaries' })); } else { setExpenseForm(prev => ({ ...prev, employeeId: '', paidTo: '' })); } };
+  const handleSaveExpense = async () => {
+    if (!expenseForm.category?.trim()) return showNotification('Category is required', 'error');
+    if (!(Number(expenseForm.amount) > 0)) return showNotification('Amount must be greater than 0', 'error');
+    if (!expenseForm.date?.trim()) return showNotification('Date is required', 'error');
+    if (!expenseForm.paidTo?.trim()) return showNotification('Paid To is required', 'error');
+    try { let final = { ...expenseForm }; if (modalType === 'edit' && currentRecord?.id) await updateExpense(currentRecord.id, final); else { const seq = await getNextSequentialId('expenses'); final.autoId = 'EXP-' + String(seq).padStart(3, '0'); await addExpense(final); }     closeModal(); setExpenseForm({ autoId: generateAutoId('E'), category: 'Salaries', amount: 0, description: '', date: '', paidTo: '', employeeId: '', status: 'pending', billUrl: '', salaryMonth: '' }); setBillFile(null); loadData(); showNotification('Expense saved successfully', 'success'); } catch (error) { showFirebaseError(error, 'Failed to save expense'); }
+  };
 
   // ===== Student Deactivation & Refund =====
   const closeDeactModal = () => { setDeactTarget(null); setDeactStep('confirm'); setDeactReason(''); setRefundAmount(''); setRefundDesc(''); };
@@ -1009,6 +1103,24 @@ const App: React.FC = () => {
   const handleDirectSalaryPay = async (expense: any) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
     try {
+      const month = String(expense.date || expense.salaryMonth || '').substring(0, 7);
+      const pendingSalary = expenses.find(e =>
+        e.employeeId === expense.employeeId &&
+        e.category === 'Salaries' &&
+        e.status !== 'paid' &&
+        ((e.salaryMonth || '') === month || (e.date || '').startsWith(month))
+      );
+      if (pendingSalary?.id) {
+        await updateExpense(pendingSalary.id, {
+          status: 'paid',
+          amount: Number(expense.amount) || pendingSalary.amount,
+          paidTo: expense.paidTo || pendingSalary.paidTo,
+          date: expense.date || pendingSalary.date,
+        });
+        loadData();
+        showNotification(`Salary for ${pendingSalary.paidTo} marked PAID (${pendingSalary.autoId})`, 'success');
+        return;
+      }
       const seq = await getNextSequentialId('expenses');
       const final = { ...expense, autoId: 'EXP-' + String(seq).padStart(3, '0'), status: 'paid' };
       await addExpense(final);
@@ -1017,15 +1129,15 @@ const App: React.FC = () => {
     } catch (error) { showFirebaseError(error, 'Failed to add salary expense'); }
   };
   const handleDeleteSalaryExpenses = async (expenses: any[]) => {
-    if (isReadOnly) { showNotification('Read-only mode: cannot delete expense', 'error'); return; }
+    if (isReadOnly) { showNotification('Read-only mode: cannot mark salary unpaid', 'error'); return; }
     if (!expenses || expenses.length === 0) return;
     const label = expenses.length === 1 ? `salary expense ${expenses[0].autoId || ''}` : `${expenses.length} salary expenses`;
-    if (!confirm(`Delete ${label} for ${expenses[0].paidTo || 'employee'}? The employee will be marked unpaid.`)) return;
+    if (!confirm(`Mark ${label} for ${expenses[0].paidTo || 'employee'} as UNPAID? The record stays in the Expenses page as pending.`)) return;
     try {
-      for (const e of expenses) await deleteExpense(e.id!);
+      for (const e of expenses) await updateExpense(e.id!, { status: 'pending' });
       await loadData();
-      showNotification('Salary expense deleted — employee marked unpaid', 'success');
-    } catch (error) { showFirebaseError(error, 'Failed to delete salary expense'); }
+      showNotification('Salary expense marked UNPAID — record kept in Expenses', 'success');
+    } catch (error) { showFirebaseError(error, 'Failed to mark salary expense unpaid'); }
   };
   const handleToggleEmployeeHidden = async (emp: Employee) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot change visibility', 'error'); return; }
@@ -4199,25 +4311,48 @@ const App: React.FC = () => {
     { name: 'Lost', value: equipments.filter(eq => eq.condition === 'Lost').length },
   ].filter(item => item.value > 0);
 
-  const navItems = [
+  const navItems: any[] = [
     { id: 'dashboard', icon: FiBarChart2, label: 'Dashboard' },
-    { id: 'students', icon: FiUsers, label: 'Students', children: [
+    { id: 'entries', icon: FiPlus, label: 'Entries', children: [
       { id: 'studentadd', icon: FiPlus, label: 'Student Add' },
-      { id: 'studentlist', icon: FiUsers, label: 'Student List' },
-      { id: 'deactivatestudent', icon: FiAlertTriangle, label: 'Deactivate Student' },
-      { id: 'studentedit', icon: FiEdit2, label: 'Student Documents' },
+      { id: 'employees', icon: FiBriefcase, label: 'Employee Add' },
+      { id: 'equipments', icon: FiGrid, label: 'Equipment Add' },
+      { id: 'fees', icon: FiDollarSign, label: 'Add Fee/Billing' },
+      { id: 'expenses', icon: FiTrendingDown, label: 'Add Expense' },
     ] },
-    { id: 'fees', icon: FiDollarSign, label: 'Fees & Billing' },
-    { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' },
-    { id: 'attendance', icon: FiCheck, label: 'Attendance' },
-    { id: 'employees', icon: FiBriefcase, label: 'Employees' },
-    { id: 'equipments', icon: FiGrid, label: 'Equipments' },
-    { id: 'expenses', icon: FiTrendingDown, label: 'Expenses' },
-    { id: 'schedule', icon: FiCalendar, label: 'Schedule' },
-    { id: 'reports', icon: FiPieChart, label: 'Reports' },
-    { id: 'correction', icon: FiEdit2, label: 'Correction' },
+    { id: 'transactions', icon: FiDollarSign, label: 'Transactions', children: [
+      { id: 'fees_list', icon: FiDollarSign, label: 'Fees & Billing' },
+      { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' },
+      { id: 'expenses_list', icon: FiTrendingDown, label: 'Expenses List' },
+      { id: 'attendance', icon: FiCheck, label: 'Attendance' },
+    ] },
+    { id: 'reports', icon: FiPieChart, label: 'Reports', children: [
+      { id: 'reports_overview', icon: FiPieChart, label: 'Reports Overview' },
+      { id: 'studentlist', icon: FiUsers, label: 'Student List' },
+      { id: 'deactivatestudent', icon: FiAlertTriangle, label: 'Deactivated Students' },
+      { id: 'studentedit', icon: FiEdit2, label: 'Student Documents' },
+      { id: 'schedule', icon: FiCalendar, label: 'Schedule' },
+      { id: 'correction', icon: FiEdit2, label: 'Correction' },
+    ] },
+    { id: 'sms', icon: FiSend, label: 'SMS' },
     { id: 'ai', icon: FiCpu, label: 'AI Assistant' },
   ];
+  const tabAlias: Record<string, Tab> = {
+    fees_list: 'fees' as Tab,
+    expenses_list: 'expenses' as Tab,
+    reports_overview: 'reports' as Tab,
+  };
+  const resolveTab = (id: string): Tab => (tabAlias[id] || id) as Tab;
+  useEffect(() => { setExpandedFolders({}); }, [activeTab]);
+  const visibleNavItems = isAdminMode ? navItems.map(item => {
+    if ((item as any).children) {
+      const filteredChildren = ((item as any).children as any[]).filter((c: any) => (allowedAdminTabs as string[]).includes(resolveTab(c.id)));
+      const parentAllowed = (allowedAdminTabs as string[]).includes(item.id);
+      if (filteredChildren.length === 0 && !parentAllowed) return null;
+      return filteredChildren.length > 0 ? { ...item, children: filteredChildren } : (parentAllowed ? { ...item, children: undefined } : null);
+    }
+    return (allowedAdminTabs as string[]).includes(item.id) ? item : null;
+  }).filter(Boolean) as typeof navItems : navItems;
   const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : ['studentadd', 'studentlist', 'deactivatestudent'].includes(activeTab) ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : 'Employee Management';
 
   const searchBtn = "flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 px-5 py-3 rounded-xl transition-all";
@@ -4238,7 +4373,7 @@ const App: React.FC = () => {
 
 
   return (
-    <div className="min-h-screen bg-[#121212] text-white font-sans">
+    <div className="min-h-screen font-sans" style={{ fontFamily: "'DM Sans', system-ui, sans-serif", backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)' }}>
       {notification && <div className={`fixed top-4 right-4 z-50 px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 ${notification.type === 'success' ? 'bg-gradient-to-r from-emerald-600 to-emerald-500' : 'bg-gradient-to-r from-red-600 to-red-500'}`}>{notification.type === 'success' ? <FiCheck size={20} /> : <FiAlertCircle size={20} />}<span className="font-semibold">{notification.message}</span></div>}
 
       {firebaseErrorLog.length > 0 && (
@@ -4308,7 +4443,7 @@ const App: React.FC = () => {
               <div className="space-y-1"><label className="text-xs text-cyan-400">Assigned To Type</label><select value={equipmentForm.assignedToType} onChange={e => handleEquipmentAssignedTypeChange(e.target.value as Equipment['assignedToType'])} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="student">Student</option><option value="teacher">Teacher</option><option value="event">Event</option><option value="school">School</option><option value="other">Other</option></select></div>
               {equipmentForm.assignedToType === 'student' && <>
                 <div className="space-y-1"><label className="text-xs text-cyan-400">Select Class</label><select value={equipmentStudentClassFilter} onChange={e => { setEquipmentStudentClassFilter(e.target.value); setEquipmentForm(prev => ({ ...prev, assignedToId: '', assignedToName: '', status: 'Pending' })); }} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Class --</option>{[...new Set(students.filter(s => s.status === 'ACTIVE').map(s => s.class))].filter(Boolean).sort().map(cls => <option key={cls} value={cls}>{cls}</option>)}</select></div>
-                <div className="space-y-1"><label className="text-xs text-cyan-400">Select Student</label><select value={students.find(s => s.autoId === equipmentForm.assignedToId)?.id || ''} onChange={e => handleEquipmentAssigneeChange(e.target.value)} disabled={!equipmentStudentClassFilter} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white disabled:opacity-50"><option value="">{equipmentStudentClassFilter ? '-- Select Student --' : 'Select class first (Pending)'}</option>{students.filter(s => s.status === 'ACTIVE' && s.class === equipmentStudentClassFilter).sort((a, b) => a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.autoId} - {s.name}</option>)}</select></div>
+                <div className="space-y-1"><label className="text-xs text-cyan-400">Select Student</label><select value={students.find(s => s.autoId === equipmentForm.assignedToId)?.id || ''} onChange={e => handleEquipmentAssigneeChange(e.target.value)} disabled={!equipmentStudentClassFilter} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white disabled:opacity-50"><option value="">{equipmentStudentClassFilter ? '-- Select Student --' : 'Select class first (Pending)'}</option>{students.filter(s => s.status === 'ACTIVE' && !isDeactivatedStudent(s) && s.class === equipmentStudentClassFilter).sort((a, b) => a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.autoId} - {s.name}</option>)}</select></div>
               </>}
               {equipmentForm.assignedToType === 'teacher' && <>
                 <div className="space-y-1"><label className="text-xs text-cyan-400">Select Role</label><select value={equipmentEmployeeRoleFilter} onChange={e => { setEquipmentEmployeeRoleFilter(e.target.value); setEquipmentForm(prev => ({ ...prev, assignedToId: '', assignedToName: '', status: 'Pending' })); }} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Role --</option>{[...new Set(employees.filter(e => e.status === 'ACTIVE').map(e => e.role))].filter(Boolean).sort().map(role => <option key={role} value={role}>{role}</option>)}</select></div>
@@ -4330,51 +4465,54 @@ const App: React.FC = () => {
 
       {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} forceFeeForm={forceFeeForm} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
 
-      <div className="fixed left-0 top-0 h-full w-72 bg-[#1E1E1E] border-r border-gray-800 p-6 flex flex-col z-40">
-        <div className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-8 flex items-center gap-3 shrink-0">
-          <div className="p-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl shadow-lg shadow-cyan-500/30"><SchoolLogo /></div><span>School OS</span>
-        </div>
-        <nav className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
-          {navItems.map(item => {
-            if (item.children) {
-              const folderActive = (item.children as any[]).some(c => activeTab === c.id);
+      <div className="sticky top-0 left-0 w-full backdrop-blur-md border-b px-6 py-4 flex flex-wrap items-center gap-3 z-40" style={{ backgroundColor: 'color-mix(in srgb, var(--bg-neu) 92%, transparent)', borderColor: 'rgba(255,255,255,0.06)', boxShadow: '0 4px 24px color-mix(in srgb, var(--dark-shadow) 45%, transparent)' }}>
+        <div className="text-xl font-display font-extrabold tracking-tight flex items-center gap-3" style={{ color: 'var(--text-neu)' }}><div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%)', boxShadow: '5px 5px 12px var(--dark-shadow), -4px -4px 10px var(--light-shadow)', border: '1px solid rgba(255,255,255,0.14)' }}><SchoolLogo size={22} /></div><span>School OS</span>{isAdminMode && <span className="ml-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 border border-amber-500/20">Admin Reports</span>}</div>
+        <nav className="flex flex-wrap gap-2 items-center">
+          {visibleNavItems.map(item => {
+            const hasChildren = !!item.children;
+            const isActiveParent = hasChildren ? (item.children as any[]).some((c: any) => resolveTab(c.id) === activeTab) : activeTab === item.id;
+            const isOpen = !!expandedFolders[item.id];
+            if (hasChildren) {
               return (
-                <div key={item.id}>
-                  <button onClick={() => setExpandedFolders(prev => ({ ...prev, [item.id]: !prev[item.id] }))} className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 group ${folderActive ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
-                    <item.icon className={`${folderActive ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={20} />
-                    <span className={`${folderActive ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{item.label}</span>
-                    {expandedFolders[item.id] ? <FiChevronUp className="ml-auto text-gray-500 transition-transform" size={16} /> : <FiChevronDown className="ml-auto text-gray-500 transition-transform" size={16} />}
+                <div key={item.id} className="relative">
+                  <button onClick={() => setExpandedFolders(prev => ({ ...prev, [item.id]: !prev[item.id] }))} aria-expanded={isOpen} aria-haspopup="true" className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium transition-all duration-300 border ${isActiveParent ? 'border-transparent' : 'border-transparent hover:border-[rgba(255,255,255,0.06)]'}`} style={isActiveParent ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.06)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)' }}>
+                    <item.icon size={16} style={{ color: isActiveParent ? 'var(--accent)' : 'var(--text-muted)' }} />
+                    <span>{item.label}</span>
+                    <span className={`ml-1 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}><FiChevronDown size={14} /></span>
                   </button>
-                  {expandedFolders[item.id] && (
-                    <div className="mt-1 space-y-1 pl-4">
-                      {(item.children as any[]).map(child => (
-                        <button key={child.id} onClick={() => setActiveTab(child.id as Tab)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${activeTab === child.id ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
-                          <child.icon className={`${activeTab === child.id ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={16} />
-                          <span className={`text-sm ${activeTab === child.id ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{child.label}</span>
-                          {activeTab === child.id && <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <AnimatePresence>{isOpen && (
+                    <motion.div initial={{ opacity: 0, y: -8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.98 }} transition={{ duration: 0.2, ease: 'easeOut' }} className="absolute top-full left-0 mt-3 rounded-2xl p-2 min-w-[220px] z-50 flex flex-col gap-1.5 border" style={{ backgroundColor: 'var(--bg-neu)', boxShadow: '9px 9px 16px var(--dark-shadow), -9px -9px 16px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.06)' }}>
+                      {(item.children as any[]).map((child: any) => {
+                        const target = resolveTab(child.id);
+                        const active = activeTab === target;
+                        return (
+                          <button key={child.id} onClick={() => { setActiveTab(target); setExpandedFolders(prev => ({ ...prev, [item.id]: false })); }} className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-left transition-all duration-300 border ${active ? 'border-transparent' : 'border-transparent'}`} style={active ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)' }}>
+                            <child.icon size={14} />
+                            <span>{child.label}</span>
+                            {active && <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--accent)' }} />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}</AnimatePresence>
                 </div>
               );
             }
+            const active = activeTab === item.id;
             return (
-              <button key={item.id} onClick={() => setActiveTab(item.id as Tab)} className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 group ${activeTab === item.id ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50' : 'hover:bg-gray-800 border border-transparent'}`}>
-                <item.icon className={`${activeTab === item.id ? 'text-cyan-400' : 'text-gray-400 group-hover:text-cyan-400'} transition-colors`} size={20} />
-                <span className={`${activeTab === item.id ? 'text-white font-semibold' : 'text-gray-400 group-hover:text-white'} transition-colors`}>{item.label}</span>
-                {activeTab === item.id && <div className="ml-auto w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50" />}
+              <button key={item.id} onClick={() => setActiveTab(item.id as Tab)} className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium transition-all duration-300 border ${active ? 'border-transparent' : 'border-transparent'}`} style={active ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)' }}>
+                <item.icon size={16} style={{ color: active ? 'var(--accent)' : 'var(--text-muted)' }} />
+                <span>{item.label}</span>
               </button>
             );
           })}
         </nav>
-        <div className="pt-6 border-t border-gray-800 mt-4 shrink-0"><div className="flex items-center gap-3 px-4 py-3 bg-gray-800/50 rounded-xl"><div className="w-10 h-10 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full flex items-center justify-center font-bold">A</div><div><p className="text-sm font-semibold">Admin</p><p className="text-xs text-gray-400">Super User</p></div></div></div>
       </div>
 
-      <div className="ml-72 p-8">
+      <div className="ml-0 p-8 min-h-[calc(100vh-72px)]" style={{ backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)' }}>
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'sms' ? 'SMS' : activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -4388,7 +4526,10 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'schedule', 'studentedit', 'ai'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border transition-all capitalize ${timeRange === r ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1E1E1E] border-gray-800 text-gray-400 hover:border-cyan-500/50'}`}>{r}</button>)}</div>}
+        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'schedule', 'studentedit', 'ai', 'sms'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border capitalize transition-all duration-300`} style={timeRange === r ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.04)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)', borderColor: 'transparent' }}>{r}</button>)}</div>}
+
+        <AnimatePresence mode="wait">
+          <motion.div key={activeTab} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.28, ease: 'easeOut' }}>
 
         {/* ===== Attendance ===== */}
         {activeTab === 'attendance' && (
@@ -4467,8 +4608,13 @@ const App: React.FC = () => {
                       <td className="px-6 py-4 hidden md:table-cell"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{s.package}</span></td><td className="px-6 py-4 font-semibold text-yellow-400">₹{(s.feeAmount || 0).toLocaleString()}</td><td className="px-6 py-4 text-gray-400 hidden lg:table-cell">{s.parentName}</td>
                       <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${s.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{s.status}</span></td>
                       <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => handlePayStudent(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Pay Fee"><FiDollarSign size={18} /></button><button onClick={() => exportStudentIDCard(s)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download ID Card"><FiFileText size={18} /></button><button onClick={() => openEditModal(s, 'student')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Student"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(s.id!, 'student')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Student"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
-                    </tr>
-                  ))}
+                  </tr>
+              ))}
+                  {filteredStudentsForStudentTab.length === 0 && (
+                    <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                      {students.length === 0 ? 'No students found. If you expect data, make sure the backend is running, then click Refresh.' : 'No students match your search or filter.'}
+                    </td></tr>
+                  )}
                 </tbody>
               </table></div>
             </div>
@@ -4494,6 +4640,7 @@ const App: React.FC = () => {
                   <div className="space-y-1"><label className="text-xs text-cyan-400">Class *</label><select value={studentForm.class} onChange={e => { setStudentForm(prev => ({ ...prev, class: e.target.value, rollNumber: e.target.value ? generateRollNumber(e.target.value) : '' })); }} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Class --</option>{[...classes].sort().map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                   <div className="space-y-1"><label className="text-xs text-cyan-400">Package</label><select value={studentForm.package} onChange={e => handlePackageChange(e.target.value)} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value="">-- Select Package --</option>{packages.map(p => <option key={p.name} value={p.name}>{p.name} (₹{p.amount.toLocaleString()})</option>)}<option value="Custom">Custom</option></select></div>
                   <div className="space-y-1"><label className="text-xs text-cyan-400">Fee Amount (₹) *</label><input type="number" value={studentForm.feeAmount || ''} onChange={e => setStudentForm(prev => ({ ...prev, feeAmount: parseFloat(e.target.value) || 0 }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
+                  <div className="space-y-1"><label className="text-xs text-cyan-400">EMI Months (max 11)</label><select value={studentForm.emiMonths || 1} onChange={e => setStudentForm(prev => ({ ...prev, emiMonths: parseInt(e.target.value) || 1 }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option value={1}>1 Month</option><option value={2}>2 Months</option><option value={3}>3 Months</option><option value={6}>6 Months</option><option value={9}>9 Months</option><option value={11}>11 Months</option></select></div>
                   <div className="space-y-1"><label className="text-xs text-cyan-400">Roll Number</label><input value={studentForm.rollNumber} readOnly className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-gray-500" /></div>
                   <div className="space-y-1"><label className="text-xs text-cyan-400">Gender</label><select value={studentForm.gender} onChange={e => setStudentForm(prev => ({ ...prev, gender: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"><option>MALE</option><option>FEMALE</option><option>OTHER</option></select></div>
                   <div className="space-y-1"><label className="text-xs text-cyan-400">Date of Birth</label><input type="date" value={studentForm.dateOfBirth} onChange={e => setStudentForm(prev => ({ ...prev, dateOfBirth: e.target.value }))} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" /></div>
@@ -4666,9 +4813,15 @@ const App: React.FC = () => {
                     <td className="px-6 py-4 font-mono text-cyan-400">{f.autoId}</td><td className="px-6 py-4 font-semibold">{f.studentName}</td><td className="px-6 py-4 font-semibold">₹{f.amount.toLocaleString()}</td><td className="px-6 py-4">{f.type}</td><td className="px-6 py-4 text-gray-400">{f.description || '-'}</td><td className="px-6 py-4 text-gray-400">{f.dueDate || '-'}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${getEffectiveFeeStatus(f) === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : getEffectiveFeeStatus(f) === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{getEffectiveFeeStatus(f)}</span></td>
                   <td className="px-6 py-4">{f.billUrl && <button onClick={() => previewBill(f.billUrl!)} className="text-cyan-400 hover:text-cyan-300"><FiImage size={18} /></button>}</td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => exportFeeInvoice(f)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download Invoice"><FiFileText size={18} /></button><button onClick={() => openEditModal(f, 'fee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(f.id!, 'fee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => exportFeeInvoice(f)} className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-emerald-500/20 rounded" title="Download Invoice"><FiFileText size={18} /></button><button onClick={() => openEditModal(f, 'fee')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Fee"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(f.id!, 'fee')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Fee"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
-              ))}</tbody>
+              ))}
+              {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length === 0 && (
+                <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                  {fees.length === 0 ? 'No fees found. If you expect data, make sure the backend is running, then click Refresh.' : 'No fees match your search or filter.'}
+                </td></tr>
+              )}
+              </tbody>
             </table></div></div>
             {fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllFees ? 'Showing all' : `Showing 5 of ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length}`}</p><button onClick={() => setShowAllFees(!showAllFees)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllFees ? 'Show Less' : `View All ${fees.filter(f => { const matchSearch = f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || f.autoId.toLowerCase().includes(searchTerm.toLowerCase()); if (!matchSearch) return false; if (!studentClassFilter) return true; const student = students.find(s => s.autoId === f.studentId || (s.secondaryAutoId && s.secondaryAutoId === f.secondaryAutoId)); return student?.class === studentClassFilter; }).length}`}</button></div>}
           </div>
@@ -4844,9 +4997,15 @@ const App: React.FC = () => {
                   <td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-semibold ${eq.condition === 'New' || eq.condition === 'Good' ? 'bg-emerald-500/20 text-emerald-400' : eq.condition === 'Repair Needed' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{eq.condition}</span></td>
                   <td className="px-6 py-4 font-semibold text-yellow-400">₹{((eq.value || 0) * (eq.quantity || 1)).toLocaleString()}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${eq.status === 'Available' ? 'bg-cyan-500/20 text-cyan-400' : eq.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400' : eq.status === 'Pending' || ((eq.assignedToType === 'student' || eq.assignedToType === 'teacher') && !eq.assignedToId) ? 'bg-yellow-500/20 text-yellow-400' : eq.status === 'In Repair' ? 'bg-orange-500/20 text-orange-400' : 'bg-gray-500/20 text-gray-400'}`}>{(eq.status === 'Pending' || ((eq.assignedToType === 'student' || eq.assignedToType === 'teacher') && !eq.assignedToId)) ? 'Pending' : eq.status}</span></td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(eq, 'equipment')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(eq.id!, 'equipment')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(eq, 'equipment')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Equipment"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(eq.id!, 'equipment')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Equipment"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
-              ); })}</tbody>
+              ); })}
+              {equipments.filter(eq => eq.name.toLowerCase().includes(searchTerm.toLowerCase()) || eq.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || eq.category.toLowerCase().includes(searchTerm.toLowerCase()) || (eq.assignedToName || '').toLowerCase().includes(searchTerm.toLowerCase()) || eq.assignedToType.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                <tr><td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                  {equipments.length === 0 ? 'No equipments found. If you expect data, make sure the backend is running, then click Refresh.' : 'No equipments match your search.'}
+                </td></tr>
+              )}
+              </tbody>
             </table></div></div>
           </div>
         )}
@@ -4860,22 +5019,29 @@ const App: React.FC = () => {
               <div className="bg-[#1E1E1E] p-4 rounded-xl border border-gray-800"><p className="text-gray-400 text-xs">Employee-Linked</p><p className="text-2xl font-bold text-cyan-400">{expenses.filter(e => e.employeeId).length}</p></div>
             </div>
             <div className="flex flex-col lg:flex-row gap-4">
-              <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" /><input placeholder="Search description or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-[#1E1E1E] border border-gray-800 rounded-xl focus:outline-none focus:border-cyan-500 transition" /></div>
+              <div className="flex-1 relative"><FiSearch className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} /><input placeholder="Search description or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 border-none rounded-2xl focus:outline-none" style={{ backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)', boxShadow: 'inset 6px 6px 10px var(--dark-shadow), inset -6px -6px 10px var(--light-shadow)' }} /></div>
+              <select value={expenseCategoryFilter} onChange={e => setExpenseCategoryFilter(e.target.value)} className="p-3 border-none rounded-2xl min-w-[160px] focus:outline-none" style={{ backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)' }}><option value="">All Categories</option>{[...new Set(expenses.map(e => e.category).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}</select>
               <div className="flex flex-wrap gap-2">{!isReadOnly && <button onClick={openAddModal} className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 px-5 py-3 rounded-xl font-semibold shadow-lg shadow-cyan-500/20"><FiPlus size={18} />Add Expense</button>}<button onClick={() => exportToExcel(expenses, 'Expenses')} className={searchBtn + ' hover:border-emerald-500/50'}><FiDownload size={18} />Excel</button><button onClick={() => exportExpenseReportPDF()} className={searchBtn + ' hover:border-red-500/50'}><FiFileText size={18} />PDF</button>{!isReadOnly && <label className={searchBtn + ' hover:border-yellow-500/50 cursor-pointer'}><FiUpload size={18} />Import<input type="file" accept=".xlsx,.xls" onChange={importFromExcel} className="hidden" /></label>}</div>
             </div>
             <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden"><div className="overflow-x-auto"><table className="w-full">
               <thead className="bg-gray-800/50"><tr><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Auto ID</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Category</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Amount</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Paid To</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Date</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Status</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Bill</th><th className="px-6 py-4 text-left text-sm font-semibold text-gray-400 whitespace-nowrap">Actions</th></tr></thead>
-              <tbody>{expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, showAllExpenses ? undefined : 5).map(e => (
+              <tbody>{expenses.filter(e => (!expenseCategoryFilter || e.category === expenseCategoryFilter) && (e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase()))).slice(0, showAllExpenses ? undefined : 5).map(e => (
                 <tr key={e.id} className="border-t border-gray-800 hover:bg-gray-800/30 transition">
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-semibold">{e.category}</span></td><td className="px-6 py-4 font-semibold">₹{e.amount.toLocaleString()}</td>
                   <td className="px-6 py-4">{e.paidTo}{e.employeeId && <span className="ml-2 text-xs text-cyan-400">🔗 Linked</span>}</td><td className="px-6 py-4 text-gray-400 hidden md:table-cell">{e.salaryMonth ? <span>{e.salaryMonth}{e.date && <span className="ml-1 text-xs text-gray-600">({e.date})</span>}</span> : e.date}</td>
                   <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${e.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{e.status}</span></td>
                   <td className="px-6 py-4">{e.billUrl && <button onClick={() => previewBill(e.billUrl!)} className="text-cyan-400 hover:text-cyan-300"><FiImage size={18} /></button>}</td>
-                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'expense')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(e.id!, 'expense')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
+                  <td className="px-6 py-4">{!isReadOnly && <div className="flex gap-2"><button onClick={() => openEditModal(e, 'expense')} className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-cyan-500/20 rounded" title="Edit Expense"><FiEdit2 size={18} /></button><button onClick={() => handleDelete(e.id!, 'expense')} className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded" title="Delete Expense"><FiTrash2 size={18} /></button></div>}{isReadOnly && <FiEye className="text-gray-600" size={16} />}</td>
                 </tr>
-              ))}</tbody>
+              ))}
+              {expenses.filter(e => (!expenseCategoryFilter || e.category === expenseCategoryFilter) && (e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase()))).length === 0 && (
+                <tr><td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                  {expenses.length === 0 ? 'No expenses found. If you expect data, make sure the backend is running, then click Refresh.' : 'No expenses match your search.'}
+                </td></tr>
+              )}
+              </tbody>
             </table></div></div>
-            {expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllExpenses ? 'Showing all' : `Showing 5 of ${expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</p><button onClick={() => setShowAllExpenses(!showAllExpenses)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllExpenses ? 'Show Less' : `View All ${expenses.filter(e => e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase())).length}`}</button></div>}
+            {expenses.filter(e => (!expenseCategoryFilter || e.category === expenseCategoryFilter) && (e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase()))).length > 5 && <div className="text-center"><p className="text-gray-400 text-sm mb-3">{showAllExpenses ? 'Showing all' : `Showing 5 of ${expenses.filter(e => (!expenseCategoryFilter || e.category === expenseCategoryFilter) && (e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase()))).length}`}</p><button onClick={() => setShowAllExpenses(!showAllExpenses)} className="px-6 py-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 rounded-xl text-cyan-400">{showAllExpenses ? 'Show Less' : `View All ${expenses.filter(e => (!expenseCategoryFilter || e.category === expenseCategoryFilter) && (e.description.toLowerCase().includes(searchTerm.toLowerCase()) || e.autoId.toLowerCase().includes(searchTerm.toLowerCase()) || e.category.toLowerCase().includes(searchTerm.toLowerCase()) || e.paidTo.toLowerCase().includes(searchTerm.toLowerCase()))).length}`}</button></div>}
           </div>
         )}
 
@@ -5012,9 +5178,9 @@ const App: React.FC = () => {
                                     </td>
                                   );
                                 })}
-                              </tr>
-                            ))}
-                          </tbody>
+                  </tr>
+              ))}
+              </tbody>
                         </table>
                       </div>
                     </div>
@@ -5225,9 +5391,13 @@ const App: React.FC = () => {
             <AIAssistant variant="page" />
           </div>
         )}
-      </div>
 
-      <AIAssistant />
+        {activeTab === 'sms' && (<SmsSection students={students} fees={fees} showNotification={showNotification} smsToken={schoolSettings.smsToken || '681f0d5d-024e-452d-bbbc-6595b974c478'} smsEndpoint={schoolSettings.smsEndpoint || '/smsgw'} />)}
+          </motion.div>
+        </AnimatePresence>
+
+        <AIAssistant />
+      </div>
     </div>
   );
 };
@@ -5654,7 +5824,7 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
             <tbody>
               {items.length === 0 ? (
                 <tr><td colSpan={showCheckboxes ? (entityType === 'students' ? 7 : 5) : 4} className="px-4 py-12 text-center text-gray-500">No records found.</td></tr>
-              ) : displayItems.map((item, i) => (
+              ) : displayItems.map((item, i) => { const ri = items.indexOf(item); return (
                 <tr key={item.firestoreId || i}
                   draggable
                   onDragStart={() => handleDragStart(items.indexOf(item))}
@@ -5672,20 +5842,20 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
                   <td className="px-4 py-3 text-gray-400 font-mono text-sm">{items.indexOf(item) + 1}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1">
-                      <button onClick={() => moveItem(i, -1)} disabled={i === 0}
+                      <button onClick={() => moveItem(ri, -1)} disabled={ri === 0}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded disabled:opacity-20 disabled:cursor-not-allowed">
                         <FiChevronUp size={16} />
                       </button>
-                      <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1}
+                      <button onClick={() => moveItem(ri, 1)} disabled={ri === items.length - 1}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded disabled:opacity-20 disabled:cursor-not-allowed">
                         <FiChevronDown size={16} />
                       </button>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <input value={item.autoId} onChange={e => updateField(i, 'autoId', e.target.value)}
+                    <input value={item.autoId} onChange={e => updateField(ri, 'autoId', e.target.value)}
                       className={`w-full p-2 bg-gray-800 rounded-lg border text-white font-mono text-sm focus:outline-none ${
-                        items.some((x: any, xi: number) => xi !== i && x.autoId === item.autoId && item.autoId !== '')
+                        items.some((x: any, xi: number) => xi !== ri && x.autoId === item.autoId && item.autoId !== '')
                           ? 'border-red-500 text-red-400'
                           : 'border-gray-700 focus:border-cyan-500'
                       }`} />
@@ -5693,21 +5863,21 @@ const CorrectionSection: React.FC<CorrectionSectionProps> = ({
                   {entityType === 'students' && (
                     <>
                       <td className="px-4 py-3">
-                        <select value={item.class || ''} onChange={e => updateField(i, 'class', e.target.value)}
+                        <select value={item.class || ''} onChange={e => updateField(ri, 'class', e.target.value)}
                           className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:outline-none focus:border-cyan-500">
                           <option value="">— Select Class —</option>
                           {allClasses.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </td>
                       <td className="px-4 py-3">
-                        <input value={item.rollNumber} onChange={e => updateField(i, 'rollNumber', e.target.value)}
+                        <input value={item.rollNumber} onChange={e => updateField(ri, 'rollNumber', e.target.value)}
                           className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:outline-none focus:border-cyan-500" />
                       </td>
                     </>
                   )}
                   <td className="px-4 py-3 text-white text-sm">{item.name || '—'}</td>
-                </tr>
-              ))}
+                 </tr>
+              ); })}
             </tbody>
           </table>
         </div>

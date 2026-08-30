@@ -525,7 +525,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       }
     });
 
-    doc.save(`${personType}_monthly_attendance_${currentMonth}.pdf`);
+    doc.save(`employee_monthly_attendance_${currentMonth}.pdf`);
     showNotification(`Monthly attendance PDF exported`, 'success');
   };
 

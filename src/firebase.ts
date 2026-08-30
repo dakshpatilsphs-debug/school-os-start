@@ -508,3 +508,23 @@ export const deleteEquipment = async (id: string) =>
   } catch (e) { /* RTDB not available — ignore */ }
 };
 
+// ===== SMS Settings (Firestore) =====
+export const getSmsSettings = async (): Promise<{ smsToken: string; smsEndpoint: string } | null> => {
+  try {
+    const snap = await rtdbGet(dbRef(rtdb, 'settings/sms'));
+    if (snap.exists()) return snap.val() as any;
+  } catch {}
+  try {
+    const { getDoc } = await import('firebase/firestore');
+    const s = await getDoc(doc(db, 'settings', 'sms'));
+    if (s.exists()) return s.data() as any;
+  } catch {}
+  return null;
+};
+
+export const saveSmsSettings = async (data: { smsToken: string; smsEndpoint: string }) => {
+  const payload = cleanData({ ...data, updatedAt: Date.now() });
+  try { await rtdbSet(dbRef(rtdb, 'settings/sms'), payload); } catch {}
+  try { await setDoc(doc(db, 'settings', 'sms'), { ...payload, updatedAt: Timestamp.now() }, { merge: true }); } catch {}
+};
+

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FiX, FiSend, FiPaperclip, FiUser, FiCpu } from 'react-icons/fi';
+import { FiX, FiSend, FiPaperclip, FiUser, FiCpu, FiSquare } from 'react-icons/fi';
 import type { ChatMessage, AttachmentContent } from '../types/ai';
 
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY || '';
@@ -28,6 +28,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,6 +46,10 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
       if (file.size > MAX_FILE_SIZE) {
         setError(`File too large: ${file.name} (max 25 MB)`);
         continue;
+      }
+
+      if (!file.type.startsWith('image/')) {
+        setError('Note: only images are analyzed — PDF/video kept locally but not sent.');
       }
 
       const data = await fileToBase64(file);
@@ -114,6 +119,9 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
     setLoading(true);
     setError(null);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const openRouterMessages = buildMessages();
 
@@ -125,6 +133,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
           'HTTP-Referer': window.location.origin,
           'X-Title': 'School OS',
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model: OPENROUTER_MODEL,
           messages: openRouterMessages,
@@ -151,6 +160,10 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
       };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        setError('Generation stopped.');
+        return;
+      }
       console.error('AI Assistant error:', err);
       setMessages(prev => [...prev, {
         id: nextId(),
@@ -160,12 +173,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
       }]);
     } finally {
       setLoading(false);
+      abortRef.current = null;
       textareaRef.current?.focus();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !loading) {
       e.preventDefault();
       sendMessage();
     }
@@ -187,7 +201,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
           <p className="text-[10px] text-gray-400 truncate">Gemma via OpenRouter</p>
         </div>
         {!isPage && (
-          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white transition p-1 shrink-0">
+          <button onClick={() => setOpen(false)} aria-label="Close AI Assistant" className="text-gray-400 hover:text-white transition p-1 shrink-0">
             <FiX size={18} />
           </button>
         )}
@@ -274,8 +288,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
             <span key={i} className="flex items-center gap-1.5 bg-gray-800/80 rounded-lg px-2.5 py-1 text-xs text-gray-300">
               {att.mime.startsWith('image/') ? '📷' : att.mime === 'application/pdf' ? '📄' : '🎥'}
               <span className="truncate max-w-[100px]">{att.originalName}</span>
-              <button onClick={() => removeAttachment(i)} className="text-gray-500 hover:text-red-400 ml-0.5">
-                <FiX size={12} />
+               <button onClick={() => removeAttachment(i)} aria-label={`Remove attachment ${att.originalName}`} className="text-gray-500 hover:text-red-400 ml-0.5">
+                 <FiX size={12} />
               </button>
             </span>
           ))}
@@ -287,6 +301,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
         <div className="flex items-end gap-2">
           <button
             onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach file"
             className="p-2.5 text-gray-400 hover:text-cyan-400 hover:bg-gray-800/60 rounded-xl transition shrink-0 mb-0.5"
             title="Attach file"
           >
@@ -305,11 +320,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
               className="flex-1 bg-gray-800/80 border border-gray-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500/50 transition min-h-[42px] max-h-[120px]"
             />
             <button
-              onClick={sendMessage}
-              disabled={loading || (!input.trim() && attachments.length === 0)}
+              onClick={loading ? () => abortRef.current?.abort() : sendMessage}
+              disabled={!loading && (!input.trim() && attachments.length === 0)}
+              aria-label={loading ? 'Stop generation' : 'Send message'}
               className="p-2.5 text-white bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed transition shrink-0 mb-0.5"
             >
-              <FiSend size={18} />
+              {loading ? <FiSquare size={18} /> : <FiSend size={18} />}
             </button>
           </div>
         </div>
@@ -325,13 +341,14 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
     <>
       <button
         onClick={() => setOpen(!open)}
+        aria-label={open ? 'Close AI Assistant' : 'Open AI Assistant'}
         className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-full shadow-2xl shadow-cyan-500/30 flex items-center justify-center transition-all hover:scale-110 active:scale-95"
         title="AI Assistant"
       >
         {open ? <FiX size={24} /> : <FiCpu size={24} />}
       </button>
       {open && (
-        <div className="fixed bottom-24 right-6 z-40 w-96 h-[600px] max-h-[calc(100vh-180px)] bg-[#1A1A2E] border border-gray-700/50 rounded-2xl shadow-2xl backdrop-blur-xl">
+        <div className="fixed bottom-24 right-6 z-40 w-[min(24rem,calc(100vw-3rem))] h-[600px] max-h-[calc(100vh-180px)] bg-[#1A1A2E] border border-gray-700/50 rounded-2xl shadow-2xl backdrop-blur-xl">
           {chatPanel}
         </div>
       )}
@@ -340,9 +357,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ variant = 'floating' }) => {
 };
 
 function renderMarkdown(text: string): React.ReactNode {
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
   const lines = text.split('\n');
   return lines.map((line, i) => {
-    const rendered = line
+    const rendered = escapeHtml(line)
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/__(.*?)__/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
