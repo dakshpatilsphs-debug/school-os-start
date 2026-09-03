@@ -35,6 +35,7 @@ import AIAssistant from './components/AIAssistant';
 import { SmsSection } from './SmsSection';
 import { motion, AnimatePresence } from 'framer-motion';
 import { translations, t as tr } from './i18n';
+import { exportProperExcel, studentColumns, feeColumns, expenseColumns, employeeColumns, equipmentColumns, feesByStudentColumns, exportSampleExcel } from './utils/excelHelper';
 
 type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai' | 'sms';
 
@@ -3614,7 +3615,75 @@ const App: React.FC = () => {
     setShowModal(true);
   };
 
-  const exportToExcel = (data: any[], filename: string) => { const ws = XLSX.utils.json_to_sheet(data.map(({ id, createdAt, billUrl, ...rest }) => rest)); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Sheet1'); XLSX.writeFile(wb, `${filename}.xlsx`); showNotification('Exported to Excel successfully', 'success'); };
+  const exportToExcel = (data: any[], filename: string) => {
+    try {
+      const clean = (data || []).map(({ id, createdAt, updatedAt, billUrl, ...rest }: any) => rest);
+      const lower = filename.toLowerCase();
+      let columns: any = null;
+      let title = filename;
+      let subtitle = '';
+      let sheetName = filename;
+      let showTotals = false;
+
+      if (lower.includes('student') && !lower.includes('fee')) {
+        columns = studentColumns;
+        title = 'Student Register';
+        subtitle = `${clean.filter((s: any) => !String(s.autoId || '').startsWith('D-')).length} active / ${clean.length} total students`;
+        sheetName = 'Students';
+      } else if (lower.includes('fee') && lower.includes('by student')) {
+        columns = feesByStudentColumns;
+        title = 'Fees By Student';
+        subtitle = `Collection status per student`;
+        sheetName = 'Fees By Student';
+        showTotals = true;
+      } else if (lower.includes('fee')) {
+        columns = feeColumns;
+        title = 'Fees & Billing';
+        subtitle = `${clean.filter((f: any) => f.status === 'paid').length} paid / ${clean.length} records`;
+        sheetName = 'Fees';
+        showTotals = true;
+      } else if (lower.includes('expense')) {
+        columns = expenseColumns;
+        title = 'Expenses Log';
+        sheetName = 'Expenses';
+        showTotals = true;
+      } else if (lower.includes('employee')) {
+        columns = employeeColumns;
+        title = 'Employee Directory';
+        sheetName = 'Employees';
+        showTotals = true;
+      } else if (lower.includes('equipment')) {
+        columns = equipmentColumns;
+        title = 'Equipment Register';
+        sheetName = 'Equipments';
+        // compute total value for each row
+        clean.forEach((r: any) => { r._totalValue = (Number(r.value) || 0) * (Number(r.quantity) || 1); });
+        showTotals = true;
+      } else {
+        // Generic fallback: derive columns from keys
+        const first = clean[0] || {};
+        const keys = Object.keys(first).filter(k => !['id', 'createdAt', 'updatedAt', 'billUrl', 'secondaryAutoId', 'sortOrder', 'hidden', 'monthSalary', 'monthDeduction', 'submittedDocuments'].includes(k));
+        columns = keys.map(k => ({ header: k.charAt(0).toUpperCase() + k.slice(1).replace(/([A-Z])/g, ' $&'), key: k, width: 14 }));
+        title = filename;
+        sheetName = filename.slice(0, 31);
+      }
+
+      // For student export, ensure _totalValue etc not needed
+      exportProperExcel({
+        schoolSettings,
+        title,
+        subtitle: `${subtitle} • ${schoolSettings.schoolName || 'School OS'}`,
+        filename,
+        sheetName,
+        columns,
+        data: clean,
+        showTotals,
+        extraInfo: `Generated: ${new Date().toLocaleString('en-IN')}`,
+      }, showNotification);
+    } catch (e: any) {
+      showNotification('Failed to export Excel: ' + (e?.message || 'Unknown error'), 'error');
+    }
+  };
   const exportToPDF = (data: any[], title: string) => {
     const doc = new jsPDF();
     const pw = 210;
@@ -4326,25 +4395,7 @@ const App: React.FC = () => {
 
   const downloadSampleExcel = () => {
     const isFees = activeTab === 'fees';
-    const aoa: any[][] = isFees
-      ? [
-          ['Auto ID', 'Student Auto ID', 'Student Name', 'Amount', 'Fee Type', 'Due Date', 'Paid Date', 'Status', 'Description'],
-          ['FEE-001', 'STU-001', 'John Doe', 16000, 'Tuition Fee', '2026-01-10', '2026-01-05', 'paid', 'Term 1 fees'],
-          ['FEE-002', 'STU-002', 'Jane Smith', 20000, 'Admission Fee', '2026-01-10', '', 'pending', ''],
-          ['FEE-003', 'STU-003', 'Ali Khan', 12000, 'Tuition Fee', '2026-01-10', '', 'overdue', 'Term 1 fees'],
-        ]
-      : [
-          ['Auto ID', 'Name', 'Class', 'Roll Number', 'Package', 'Fee Amount', 'Parent Name', 'Parent Phone', 'Email', 'Address', 'Date of Birth', 'Gender', 'Admission Date', 'Status'],
-          ['STU-001', 'John Doe', 'CLASS 1', '001', 'Basic', 16000, 'John Doe Sr', '9876543210', 'john@example.com', 'Main Road, City', '2018-01-01', 'MALE', '2026-04-01', 'ACTIVE'],
-          ['STU-002', 'Jane Smith', 'CLASS 1', '002', 'Standard', 20000, 'Jane Smith Sr', '9876543211', '', '', '2017-06-15', 'FEMALE', '2026-04-01', 'ACTIVE'],
-          ['', 'Ali Khan', 'CLASS 2', '', 'Basic', 12000, 'Ali Khan Sr', '9876543212', '', '', '2019-03-20', 'MALE', '2026-04-01', 'ACTIVE'],
-        ];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = (aoa[0] || []).map((_, i) => ({ wch: Math.max(...aoa.map(r => String(r[i] ?? '').length), 12) + 2 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, isFees ? 'Fees' : 'Students');
-    XLSX.writeFile(wb, `Sample_${isFees ? 'Fees' : 'Students'}_Import.xlsx`);
-    showNotification('Sample file downloaded', 'success');
+    exportSampleExcel(isFees, showNotification);
   };
 
   type ExpenseCategory = { name: string; value: number };

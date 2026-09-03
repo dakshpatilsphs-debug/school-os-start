@@ -6,6 +6,7 @@ import autoTable from 'jspdf-autotable';
 import { Employee, Attendance as Att, Holiday, Expense } from './types';
 import type { SalarySlipData } from './salarySlipTypes';
 import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, getMonthAttSummary, isClCovered } from './clUtils';
+import { exportProperExcel } from './utils/excelHelper';
 
 interface AttendanceProps {
   employees: Employee[];
@@ -152,80 +153,166 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     reader.readAsArrayBuffer(file);
   };
 
-  // ===== Download Attendance Template =====
+  // ===== Download Attendance Template (proper) =====
   const downloadAttendanceTemplate = () => {
-    const templateData = [
-      { 'Auto ID': 'STU-001', 'Name': 'JOHN DOE', 'Date': selectedDate, 'Status': 'present' },
-      { 'Auto ID': 'STU-002', 'Name': 'JANE DOE', 'Date': selectedDate, 'Status': 'absent' },
+    const exampleRows: any[][] = [
+      ['Auto ID', 'Name', 'Date', 'Status', 'Role'],
+      ['EMP-001', 'JOHN DOE', selectedDate, 'present', 'TEACHER'],
+      ['EMP-002', 'JANE DOE', selectedDate, 'absent', 'TEACHER'],
+      ['EMP-003', 'ALI KHAN', selectedDate, 'late', 'ACCOUNTANT'],
     ];
-    const ws = XLSX.utils.json_to_sheet(templateData);
+    const instrRows: any[][] = [
+      ['INSTRUCTIONS — Attendance Import'],
+      ['1. Do NOT change header row (row 1). Import reads headers exactly: Auto ID / Employee ID / ID, Name, Date, Status'],
+      ['2. Auto ID: Employee Auto ID (e.g., EMP-001). If blank, Name will be used to find employee.'],
+      ['3. Date: YYYY-MM-DD (e.g., ' + selectedDate + '). Defaults to selected date if blank.'],
+      ['4. Status must be exactly: present / absent / late (lowercase).'],
+      ['5. Role is optional — will be auto-filled from employee record.'],
+      ['6. Keep Status values clean; no extra spaces.'],
+      ['7. Delete these example rows before importing your data.'],
+      ['8. Supported: 50-500 rows per import; duplicate (person+date) will be upserted.'],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(exampleRows);
+    ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 14 }];
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 0, c: exampleRows[0].length - 1 } }) } as any;
+    ws['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' } as any;
+    // Header style
+    for (let c = 0; c < exampleRows[0].length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      const cell = ws[addr];
+      if (cell) (cell as any).s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '0EA5E9' } }, alignment: { horizontal: 'center', vertical: 'center' } };
+    }
+    const ws2 = XLSX.utils.aoa_to_sheet(instrRows);
+    ws2['!cols'] = [{ wch: 95 }];
+    const tcell = ws2[XLSX.utils.encode_cell({ r: 0, c: 0 })];
+    if (tcell) (tcell as any).s = { font: { bold: true, sz: 12, color: { rgb: '0EA5E9' } } };
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance Template');
-    XLSX.writeFile(wb, 'Attendance_Template.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+    const fname = `Attendance_Template_${selectedDate}.xlsx`;
+    try { XLSX.writeFile(wb, fname, { cellStyles: true } as any); } catch { XLSX.writeFile(wb, fname); }
     showNotification('Template downloaded', 'success');
   };
 
-  // ===== All Attendance Data (Excel) =====
+  // ===== All Attendance Data (Excel) — proper =====
   const exportAllAttendanceExcel = () => {
     if (attendance.length === 0) { showNotification('No attendance records to export', 'error'); return; }
     const data = attendance.map(a => ({
-      'Auto ID': a.personId,
-      'Name': a.personName,
-      'Type': a.personType,
-      'Date': a.date,
-      'Status': a.status,
-      'Role': (a as any).role || '',
-      'CL Status': (a as any).clStatus || '',
+      autoId: a.personId,
+      name: a.personName,
+      type: a.personType,
+      date: a.date,
+      status: a.status,
+      role: (a as any).role || '',
+      clStatus: (a as any).clStatus || '',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 12 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-    XLSX.writeFile(wb, `attendance_all.xlsx`);
-    showNotification(`Exported ${attendance.length} attendance records`, 'success');
+    const cols = [
+      { header: 'Auto ID', key: 'autoId', width: 14 },
+      { header: 'Name', key: 'name', width: 22 },
+      { header: 'Type', key: 'type', width: 10 },
+      { header: 'Date', key: 'date', width: 12, type: 'date' as const },
+      { header: 'Status', key: 'status', width: 10 },
+      { header: 'Role', key: 'role', width: 16 },
+      { header: 'CL Status', key: 'clStatus', width: 14 },
+    ];
+    exportProperExcel({
+      schoolSettings,
+      title: 'Attendance Register — All Records',
+      subtitle: `${attendance.filter(a => a.status === 'present').length} present • ${attendance.filter(a => a.status === 'absent').length} absent • ${attendance.length} total`,
+      filename: 'Attendance_All',
+      sheetName: 'Attendance',
+      columns: cols,
+      data,
+      extraInfo: `Selected: ${selectedDate}`,
+    }, showNotification);
   };
 
-  // ===== All Expense Data (Excel) =====
+  // ===== All Expense Data (Excel) — proper =====
   const exportAllExpensesExcel = () => {
     if (expenses.length === 0) { showNotification('No expense records to export', 'error'); return; }
     const data = expenses.map(e => ({
-      'Auto ID': e.autoId,
-      'Category': e.category,
-      'Amount': e.amount,
-      'Description': e.description,
-      'Date': e.date,
-      'Paid To': e.paidTo,
-      'Status': e.status,
-      'Salary Month': e.salaryMonth || '',
+      autoId: e.autoId,
+      category: e.category,
+      amount: e.amount,
+      description: e.description,
+      date: e.date,
+      paidTo: e.paidTo,
+      status: e.status,
+      salaryMonth: e.salaryMonth || '',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 12 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
-    XLSX.writeFile(wb, `expenses_all.xlsx`);
-    showNotification(`Exported ${expenses.length} expense records`, 'success');
+    const cols = [
+      { header: 'Expense ID', key: 'autoId', width: 12 },
+      { header: 'Category', key: 'category', width: 14 },
+      { header: 'Amount', key: 'amount', width: 12, type: 'currency' as const, total: true },
+      { header: 'Description', key: 'description', width: 30 },
+      { header: 'Date', key: 'date', width: 12, type: 'date' as const },
+      { header: 'Paid To', key: 'paidTo', width: 20 },
+      { header: 'Status', key: 'status', width: 10 },
+      { header: 'Salary Month', key: 'salaryMonth', width: 12 },
+    ];
+    const totalAmt = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    exportProperExcel({
+      schoolSettings,
+      title: 'Expenses Log — All Records',
+      subtitle: `₹${totalAmt.toLocaleString('en-IN')} total • ${expenses.filter(e => e.status === 'paid').length} paid • ${expenses.length} records`,
+      filename: 'Expenses_All',
+      sheetName: 'Expenses',
+      columns: cols,
+      data,
+      showTotals: true,
+      extraInfo: `Selected: ${selectedDate}`,
+    }, showNotification);
   };
 
   const exportMonthlySalaryReport = () => {
     const currentMonth = selectedDate.substring(0, 7);
+    const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
+    if (activeEmps.length === 0) { showNotification('No active employees', 'error'); return; }
     const data = activeEmps.map(e => {
       const si = getEmployeeSalaryInfo(e);
-      const effAbsent = si.absentDays;
-      const effSalary = si.earnedSalary;
       return {
-        'Auto ID': e.autoId, 'Name': e.name, 'Role': e.role, 'Month': currentMonth,
-        'Monthly Salary (₹)': si.monthlySalary, 'Working Days': si.workingDays,
-        'Present Days': si.presentDays, 'Late Days': si.lateDays, 'CL Covered': si.clCovered, 'Effective Present': si.presentDays + si.lateDays + si.clCovered,
-        'Absent Days': effAbsent,
-        'Per Day (₹)': Math.round(si.perDaySalary), 'Earned Salary (₹)': effSalary
+        autoId: e.autoId,
+        name: e.name,
+        role: e.role,
+        month: currentMonth,
+        monthlySalary: si.monthlySalary,
+        workingDays: si.workingDays,
+        presentDays: si.presentDays,
+        lateDays: si.lateDays,
+        clCovered: si.clCovered,
+        effectivePresent: si.presentDays + si.lateDays + si.clCovered,
+        absentDays: si.absentDays,
+        perDay: Math.round(si.perDaySalary),
+        earnedSalary: si.earnedSalary,
       };
     });
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Salary Report');
-    XLSX.writeFile(wb, `salary_report_${currentMonth}.xlsx`);
-    showNotification('Monthly salary report exported', 'success');
+    const cols = [
+      { header: 'Employee ID', key: 'autoId', width: 12 },
+      { header: 'Name', key: 'name', width: 20 },
+      { header: 'Role', key: 'role', width: 14 },
+      { header: 'Month', key: 'month', width: 10 },
+      { header: 'Monthly Salary', key: 'monthlySalary', width: 14, type: 'currency' as const, total: true },
+      { header: 'Working Days', key: 'workingDays', width: 12, type: 'number' as const },
+      { header: 'Present', key: 'presentDays', width: 10, type: 'number' as const },
+      { header: 'Late', key: 'lateDays', width: 8, type: 'number' as const },
+      { header: 'CL Covered', key: 'clCovered', width: 10, type: 'number' as const },
+      { header: 'Effective Present', key: 'effectivePresent', width: 14, type: 'number' as const },
+      { header: 'Absent', key: 'absentDays', width: 10, type: 'number' as const },
+      { header: 'Per Day', key: 'perDay', width: 10, type: 'currency' as const },
+      { header: 'Earned Salary', key: 'earnedSalary', width: 14, type: 'currency' as const, total: true },
+    ];
+    exportProperExcel({
+      schoolSettings,
+      title: `Monthly Salary Report — ${monthName}`,
+      subtitle: `${activeEmps.length} active employees • Working days vary by month`,
+      filename: `Salary_Report_${currentMonth}`,
+      sheetName: 'Salary Report',
+      columns: cols,
+      data,
+      showTotals: true,
+      extraInfo: monthName,
+    }, showNotification);
   };
 
   // ===== Attendance Expense PDF (monthly salary expense from attendance) =====
@@ -374,7 +461,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     }
   };
 
-  // ===== Monthly Attendance Excel (Grid Format) =====
+  // ===== Monthly Attendance Excel (Grid Format) — proper =====
   const exportMonthlyGridExcel = () => {
     const { currentMonth, daysInMonth, monthName } = getMonthInfo();
     const persons = employees.filter(e => e.status === 'ACTIVE');
@@ -400,22 +487,73 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       return row;
     });
 
-    // Convert to worksheet with merged title
-    const aoa: any[][] = [[`EMPLOYEE ATTENDANCE — ${monthName}`]];
-    aoa.push(header);
-    rows.forEach(r => aoa.push(r));
+    const schoolName = (schoolSettings?.schoolName || 'School OS').toUpperCase();
+    const genDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const aoa: any[][] = [
+      [schoolName],
+      [`EMPLOYEE ATTENDANCE — ${monthName}`],
+      [`Generated: ${genDate} • ${persons.length} employees • P=Present L=Late A=Absent C=CL Approved H=Holiday -=Not Marked`],
+      [],
+      header,
+      ...rows,
+    ];
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = [{ wch: 22 }, { wch: 12 }, ...Array(daysInMonth).fill({ wch: 4 }), { wch: 8 }, { wch: 8 }, { wch: 6 }];
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: header.length - 1 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: header.length - 1 } },
+    ];
+    ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, { hpt: 12 }, { hpt: 6 }, { hpt: 16 }];
+    ws['!freeze'] = { xSplit: 2, ySplit: 5, topLeftCell: 'C6', activePane: 'bottomRight', state: 'frozen' } as any;
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 4, c: 0 }, e: { r: 4, c: header.length - 1 } }) } as any;
+    ws['!printHeader'] = ws['!printHeader'] || [] as any;
+    // Header styling
+    for (let c = 0; c < header.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 4, c });
+      const cell = ws[addr];
+      if (cell) (cell as any).s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '0EA5E9' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: { top: { style: 'thin', color: { rgb: 'E2E8F0' } }, bottom: { style: 'thin', color: { rgb: 'E2E8F0' } } } };
+    }
+    // Title styling
+    const titleStyles = [
+      { font: { bold: true, sz: 14, color: { rgb: '0F172A' } }, alignment: { horizontal: 'center' } },
+      { font: { bold: true, sz: 11, color: { rgb: '0EA5E9' } }, alignment: { horizontal: 'center' } },
+      { font: { sz: 8, color: { rgb: '64748B' } }, alignment: { horizontal: 'center' } },
+    ];
+    for (let r = 0; r < 3; r++) {
+      const addr = XLSX.utils.encode_cell({ r, c: 0 });
+      const cell = ws[addr];
+      if (cell) (cell as any).s = titleStyles[r];
+    }
+    // Alternating row shading + status colors
+    for (let r = 5; r < 5 + rows.length; r++) {
+      for (let c = 2; c < 2 + daysInMonth; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (!cell) continue;
+        const v = String(cell.v || '');
+        if (v === 'P') (cell as any).s = { font: { bold: true, color: { rgb: '10B981' } }, alignment: { horizontal: 'center' } };
+        else if (v === 'A') (cell as any).s = { font: { bold: true, color: { rgb: 'EF4444' } }, alignment: { horizontal: 'center' } };
+        else if (v === 'L') (cell as any).s = { font: { bold: true, color: { rgb: 'F59E0B' } }, alignment: { horizontal: 'center' } };
+        else if (v === 'C') (cell as any).s = { font: { color: { rgb: '06B6D4' } }, alignment: { horizontal: 'center' } };
+        else if (v === 'H') (cell as any).s = { font: { color: { rgb: '8B5CF6' } }, alignment: { horizontal: 'center' } };
+        else (cell as any).s = { alignment: { horizontal: 'center' } };
+      }
+      // Totals bold
+      const presentAddr = XLSX.utils.encode_cell({ r, c: 2 + daysInMonth });
+      const absentAddr = XLSX.utils.encode_cell({ r, c: 2 + daysInMonth + 1 });
+      [presentAddr, absentAddr].forEach(a => { const ce = ws[a]; if (ce) (ce as any).s = { font: { bold: true }, alignment: { horizontal: 'center' } }; });
+    }
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Monthly Attendance');
-    XLSX.writeFile(wb, `employee_monthly_attendance_${currentMonth}.xlsx`);
+    const fname = `Employee_Monthly_Attendance_${currentMonth}_${genDate.replace(/ /g, '_')}.xlsx`;
+    try { XLSX.writeFile(wb, fname, { cellStyles: true } as any); } catch { XLSX.writeFile(wb, fname); }
     showNotification(`Monthly attendance grid exported`, 'success');
   };
 
-  // ===== Full Attendance Excel — one grid sheet per month (all months) =====
+  // ===== Full Attendance Excel — one grid sheet per month (all months) — proper =====
   const exportAllMonthsAttendanceExcel = () => {
     const persons = employees.filter(e => e.status === 'ACTIVE');
     if (persons.length === 0) { showNotification('No employees to export', 'error'); return; }
@@ -424,6 +562,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const effectiveMonths = months.length > 0 ? months : [getMonthInfo().currentMonth];
 
     const wb = XLSX.utils.book_new();
+    const schoolName = (schoolSettings?.schoolName || 'School OS').toUpperCase();
+    const genDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
     effectiveMonths.forEach(month => {
       const [year, m] = month.split('-').map(Number);
@@ -448,17 +588,46 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         return row;
       });
 
-      const aoa: any[][] = [[`EMPLOYEE ATTENDANCE — ${monthName}`]];
-      aoa.push(header);
-      rows.forEach(r => aoa.push(r));
+      const aoa: any[][] = [
+        [schoolName],
+        [`EMPLOYEE ATTENDANCE — ${monthName}`],
+        [`Generated: ${genDate} • ${persons.length} employees • P=Present L=Late A=Absent C=CL H=Holiday -=Not Marked`],
+        [],
+        header,
+        ...rows,
+      ];
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       ws['!cols'] = [{ wch: 22 }, { wch: 12 }, ...Array(daysInMonth).fill({ wch: 4 }), { wch: 8 }, { wch: 8 }, { wch: 6 }];
-      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: header.length - 1 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: header.length - 1 } },
+      ];
+      ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, { hpt: 12 }, { hpt: 6 }, { hpt: 16 }];
+      ws['!freeze'] = { xSplit: 2, ySplit: 5, topLeftCell: 'C6', activePane: 'bottomRight', state: 'frozen' } as any;
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 4, c: 0 }, e: { r: 4, c: header.length - 1 } }) } as any;
+      // Header style
+      for (let c = 0; c < header.length; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 4, c });
+        const cell = ws[addr];
+        if (cell) (cell as any).s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '0EA5E9' } }, alignment: { horizontal: 'center', vertical: 'center' } };
+      }
+      const tstyles = [
+        { font: { bold: true, sz: 14, color: { rgb: '0F172A' } }, alignment: { horizontal: 'center' } },
+        { font: { bold: true, sz: 11, color: { rgb: '0EA5E9' } }, alignment: { horizontal: 'center' } },
+        { font: { sz: 8, color: { rgb: '64748B' } }, alignment: { horizontal: 'center' } },
+      ];
+      for (let r = 0; r < 3; r++) {
+        const addr = XLSX.utils.encode_cell({ r, c: 0 });
+        const cell = ws[addr];
+        if (cell) (cell as any).s = tstyles[r];
+      }
       XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 31));
     });
 
-    XLSX.writeFile(wb, `employee_attendance_all_months.xlsx`);
+    const fname = `Employee_Attendance_All_Months_${genDate.replace(/ /g, '_')}.xlsx`;
+    try { XLSX.writeFile(wb, fname, { cellStyles: true } as any); } catch { XLSX.writeFile(wb, fname); }
     showNotification(`Exported full attendance for ${effectiveMonths.length} month(s)`, 'success');
   };
 
