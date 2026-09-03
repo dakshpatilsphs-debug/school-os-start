@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText } from 'react-icons/fi';
+import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText, FiSave, FiCheck, FiAlertCircle, FiSend } from 'react-icons/fi';
 import { Student, Fee, Expense, Employee } from './types';
 
 interface ModalProps {
@@ -81,6 +81,8 @@ interface ModalProps {
   // Settings
   schoolSettings: any;
   setSchoolSettings: React.Dispatch<React.SetStateAction<any>>;
+  onSaveSchoolSettings?: () => Promise<boolean>;
+  settingsSaving?: boolean;
 }
 const inputCls = "w-full p-2 bg-gray-800 rounded border border-gray-700 text-white text-sm focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 focus:outline-none transition";
 
@@ -170,11 +172,25 @@ export const AppModals: React.FC<ModalProps> = (p) => {
     </div>
   );
 
-  const renderSettings = () => (
+  const renderSettings = () => {
+    const effectiveSmsUrl = (() => {
+      const ep = (p.schoolSettings.smsEndpoint || '').trim() || '/smsgw';
+      const ip = (p.schoolSettings.smsIp || '').trim();
+      if (ep.startsWith('http://') || ep.startsWith('https://')) return ep;
+      if (ep !== '/smsgw' && ep !== '/' && ep !== '') return ep;
+      if (ip) {
+        const clean = ip.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        return clean ? `http://${clean}` : '/smsgw';
+      }
+      return ep || '/smsgw';
+    })();
+    const isSaving = !!p.settingsSaving;
+    return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">School Settings</h2>
+      <h2 className="text-xl font-bold flex items-center gap-2"><FiSettings className="text-cyan-400" /> School Settings</h2>
+      <p className="text-xs text-gray-500">Changes are stored in <code className="bg-gray-800 px-1 rounded">localStorage</code> instantly and persisted to <code className="bg-gray-800 px-1 rounded">Firebase (RTDB + Firestore)</code> when you click <b>Save Settings</b>. SMS IP + Token are editable below.</p>
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Name</label><input value={p.schoolSettings.schoolName} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, schoolName: e.target.value })} className={inputCls} /></div>
+        <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Name *</label><input value={p.schoolSettings.schoolName} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, schoolName: e.target.value })} placeholder="School Name" className={inputCls} /></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">Address</label><input value={p.schoolSettings.address} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, address: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Phone</label><input type="tel" inputMode="tel" value={p.schoolSettings.phone} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, phone: e.target.value })} className={inputCls} /></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Email</label><input type="email" value={p.schoolSettings.email} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, email: e.target.value })} className={inputCls} /></div>
@@ -185,11 +201,28 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
       {/* ===== SMS Gateway Settings ===== */}
       <div className="border-t border-gray-700 pt-4 mt-2 space-y-4">
-        <h3 className="text-base font-bold text-cyan-400">SMS Gateway</h3>
-        <p className="text-xs text-gray-500">Traccar-style HTTP SMS. Token is sent as raw <code className="bg-gray-800 px-1 rounded">Authorization</code> header. Change here and Save.</p>
+        <h3 className="text-base font-bold text-cyan-400 flex items-center gap-2"><FiSend /> SMS Gateway</h3>
+        <p className="text-xs text-gray-500">Traccar-style HTTP SMS. Token is sent as raw <code className="bg-gray-800 px-1 rounded">Authorization</code> header. Edit <b>IP</b> and <b>Token</b> then hit Save. Saved to Firebase + localStorage.</p>
         <div className="grid grid-cols-1 gap-3">
-          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Token (Authorization)</label><input value={p.schoolSettings.smsToken || ''} onChange={e => { const v = e.target.value; p.setSchoolSettings({ ...p.schoolSettings, smsToken: v }); try { localStorage.setItem('smsToken', v); } catch { } }} placeholder="681f0d5d-024e-452d-bbbc-6595b974c478" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Stored in localStorage <code>smsToken</code> and schoolSettings. Raw token, no Bearer prefix.</p></div>
-          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Endpoint</label><input value={p.schoolSettings.smsEndpoint || '/smsgw'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, smsEndpoint: e.target.value })} placeholder="/smsgw or http://10.205.244.156:8082" className={inputCls + ' font-mono text-xs'} /><p className="text-[11px] text-gray-500">Dev proxy: <code>/smsgw → http://10.205.244.156:8082</code> (vite.config.ts). Use relative <code>/smsgw</code> to avoid CORS.</p></div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Token (Authorization) *</label>
+            <div className="flex gap-2">
+              <input value={p.schoolSettings.smsToken || ''} onChange={e => { const v = e.target.value; p.setSchoolSettings({ ...p.schoolSettings, smsToken: v }); }} placeholder="681f0d5d-024e-452d-bbbc-6595b974c478" className={inputCls + ' font-mono text-xs flex-1'} />
+              <button type="button" onClick={() => { const v = p.schoolSettings.smsToken || ''; try { navigator.clipboard.writeText(v); } catch {} }} title="Copy token" className="px-3 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600 text-xs text-gray-300">Copy</button>
+            </div>
+            <p className="text-[11px] text-gray-500">Raw token, no <code>Bearer</code> prefix. Stored as <code>smsToken</code> in Firebase <code>settings/school</code> & <code>settings/sms</code> + localStorage.</p>
+          </div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Gateway IP / Host</label>
+            <input value={p.schoolSettings.smsIp || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, smsIp: e.target.value })} placeholder="10.205.244.156:8082  or  http://10.205.244.156:8082" className={inputCls + ' font-mono text-xs'} />
+            <p className="text-[11px] text-gray-500">Host + port of the Traccar SMS gateway. Example: <code>10.205.244.156:8082</code>. If Endpoint is <code>/smsgw</code>, this IP is used to build the final URL.</p>
+          </div>
+          <div className="space-y-1"><label className="text-xs text-cyan-400">SMS Endpoint / Full URL</label>
+            <input value={p.schoolSettings.smsEndpoint || '/smsgw'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, smsEndpoint: e.target.value })} placeholder="/smsgw  or  http://10.205.244.156:8082" className={inputCls + ' font-mono text-xs'} />
+            <p className="text-[11px] text-gray-500">Dev proxy: <code>/smsgw → http://10.205.244.156:8082</code> (vite.config.ts). Use relative <code>/smsgw</code> to avoid CORS in dev, or absolute <code>http://IP:PORT</code> when hosting elsewhere.</p>
+          </div>
+          <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-3 space-y-1">
+            <p className="text-xs text-gray-400 flex items-center gap-2"><FiSend size={12} className="text-cyan-400" /> Effective fetch URL: <code className="bg-black/40 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-xs">{effectiveSmsUrl}</code></p>
+            <p className="text-[11px] text-gray-500">Authorization header: <code className="font-mono bg-black/30 px-1 rounded">{p.schoolSettings.smsToken ? p.schoolSettings.smsToken.slice(0,8) + '…' : '(empty)'}</code> • Body: <code className="font-mono bg-black/30 px-1 rounded">{`{to, message}`}</code></p>
+          </div>
         </div>
       </div>
 
@@ -248,9 +281,26 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <button onClick={() => p.setSchoolSettings({ ...p.schoolSettings, pdfHeading: 'School Management Report', pdfSubtitle: 'Comprehensive data overview', pdfFooterText: 'Confidential - For internal use only', pdfStudentSubtitle: 'All registered students with details', pdfFeesSubtitle: 'Complete fee records and collection status', pdfEmployeeSubtitle: 'All staff members with salary details', pdfExpenseSubtitle: 'All recorded expenses with payment status', pdfEquipmentSubtitle: 'All equipment records and assignment details', pdfClassSummarySubtitle: 'Overview of all classes', pdfFinancialSubtitle: 'Complete financial overview', pdfLogoWidth: 40, pdfLogoHeight: 40, pdfHeaderColor: '#0ea5e9', pdfBodyColor: '#1e293b', pdfTableHeaderColor: '#0ea5e9', pdfAccentColor: '#4361ee', pdfTitleSize: 22, pdfBodySize: 10, offerTitle: 'Offer Letter', offerPointsHeading: 'Terms & Conditions', offerIntro: 'Subject: Appointment for the position of', offerPoints: 'Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies and code of conduct.\nSalary & Duties | Salary and duties will be as discussed and recorded by the administration.', offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.', offerSignatory: 'Principal / Administrator', offerAck: 'I acknowledge and accept the terms and conditions mentioned above.' })} className="text-xs text-gray-400 hover:text-cyan-400 underline">Reset all PDF settings to default</button>
       </div>
 
-      <button onClick={() => p.setShowModal(false)} className="w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white p-3 rounded-lg font-bold">Save Settings</button>
+      <button
+        onClick={async () => {
+          if (isSaving) return;
+          if (p.onSaveSchoolSettings) {
+            const ok = await p.onSaveSchoolSettings();
+            if (ok) p.setShowModal(false);
+          } else {
+            try { localStorage.setItem('schoolSettings', JSON.stringify(p.schoolSettings)); } catch {}
+            p.setShowModal(false);
+          }
+        }}
+        disabled={isSaving}
+        className={`w-full p-3 rounded-lg font-bold flex items-center justify-center gap-2 transition ${isSaving ? 'bg-gray-600 text-gray-300 cursor-wait' : 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20'}`}
+      >
+        {isSaving ? (<><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</>) : (<><FiSave /> Save Settings</>)}
+      </button>
+      {!isSaving && <p className="text-[11px] text-center text-gray-500">Saves to localStorage + Firebase <code>settings/school</code> & <code>settings/sms</code>. Effective URL shown above.</p>}
     </div>
   );
+  };
 
   const renderBillUpload = (billUrl: string | undefined) => (
     <div className="space-y-1 col-span-2">

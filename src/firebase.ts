@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where, setDoc, Timestamp } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where, setDoc, Timestamp, getDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getDatabase } from 'firebase/database';
 import { getAuth } from 'firebase/auth';
@@ -508,23 +508,78 @@ export const deleteEquipment = async (id: string) =>
   } catch (e) { /* RTDB not available — ignore */ }
 };
 
-// ===== SMS Settings (Firestore) =====
-export const getSmsSettings = async (): Promise<{ smsToken: string; smsEndpoint: string } | null> => {
+// ===== School Settings (All Settings) — persisted to RTDB + Firestore =====
+export const getSchoolSettings = async (): Promise<any | null> => {
+  try {
+    const snap = await rtdbGet(dbRef(rtdb, 'settings/school'));
+    if (snap.exists()) return snap.val() as any;
+  } catch {}
+  try {
+    const s = await getDoc(doc(db, 'settings', 'school'));
+    if (s.exists()) return s.data() as any;
+  } catch {}
+  return null;
+};
+
+export const saveSchoolSettings = async (data: any) => {
+  // Strip Firestore-unsupported undefined and keep logo even if large — errors are swallowed so localStorage remains source of truth
+  const payload = cleanData({ ...data, updatedAt: Date.now() });
+  // Also keep a dedicated sms copy for backward compat / SmsSection fallback
+  let smsPayload: any = null;
+  if (payload.smsToken || payload.smsEndpoint || (payload as any).smsIp) {
+    smsPayload = cleanData({
+      smsToken: payload.smsToken || '',
+      smsEndpoint: payload.smsEndpoint || '/smsgw',
+      smsIp: (payload as any).smsIp || '',
+      updatedAt: Date.now(),
+    });
+  }
+  try { await rtdbSet(dbRef(rtdb, 'settings/school'), payload); } catch {}
+  try { await setDoc(doc(db, 'settings', 'school'), { ...payload, updatedAt: Timestamp.now() }, { merge: true }); } catch {}
+  if (smsPayload) {
+    try { await rtdbSet(dbRef(rtdb, 'settings/sms'), smsPayload); } catch {}
+    try { await setDoc(doc(db, 'settings', 'sms'), { ...smsPayload, updatedAt: Timestamp.now() }, { merge: true }); } catch {}
+  }
+};
+
+// ===== SMS Settings (Firestore) — kept for backward compat; prefer saveSchoolSettings =====
+export const getSmsSettings = async (): Promise<{ smsToken: string; smsEndpoint: string; smsIp?: string } | null> => {
+  // Prefer the unified school settings, fallback to legacy sms node
+  try {
+    const snapSchool = await rtdbGet(dbRef(rtdb, 'settings/school'));
+    if (snapSchool.exists()) {
+      const v: any = snapSchool.val();
+      if (v.smsToken || v.smsEndpoint || v.smsIp) return { smsToken: v.smsToken || '', smsEndpoint: v.smsEndpoint || '/smsgw', smsIp: v.smsIp || '' };
+    }
+  } catch {}
+  try {
+    const docSchool = await getDoc(doc(db, 'settings', 'school'));
+    if (docSchool.exists()) {
+      const v: any = docSchool.data();
+      if (v.smsToken || v.smsEndpoint || v.smsIp) return { smsToken: v.smsToken || '', smsEndpoint: v.smsEndpoint || '/smsgw', smsIp: v.smsIp || '' };
+    }
+  } catch {}
   try {
     const snap = await rtdbGet(dbRef(rtdb, 'settings/sms'));
     if (snap.exists()) return snap.val() as any;
   } catch {}
   try {
-    const { getDoc } = await import('firebase/firestore');
     const s = await getDoc(doc(db, 'settings', 'sms'));
     if (s.exists()) return s.data() as any;
   } catch {}
   return null;
 };
 
-export const saveSmsSettings = async (data: { smsToken: string; smsEndpoint: string }) => {
+export const saveSmsSettings = async (data: { smsToken: string; smsEndpoint: string; smsIp?: string }) => {
   const payload = cleanData({ ...data, updatedAt: Date.now() });
   try { await rtdbSet(dbRef(rtdb, 'settings/sms'), payload); } catch {}
   try { await setDoc(doc(db, 'settings', 'sms'), { ...payload, updatedAt: Timestamp.now() }, { merge: true }); } catch {}
+  // Also mirror into school settings so single source of truth stays consistent
+  try {
+    const existing = await getSchoolSettings();
+    const merged = { ...(existing || {}), ...payload, updatedAt: Date.now() };
+    try { await rtdbSet(dbRef(rtdb, 'settings/school'), cleanData(merged)); } catch {}
+    try { await setDoc(doc(db, 'settings', 'school'), { ...cleanData(merged), updatedAt: Timestamp.now() }, { merge: true }); } catch {}
+  } catch {}
 };
 

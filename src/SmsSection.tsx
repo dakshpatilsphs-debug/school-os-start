@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { FiSend, FiMessageSquare, FiUsers, FiCheck, FiX, FiPhone, FiMail, FiZap } from 'react-icons/fi';
 
-const DEFAULT_SMS_TOKEN = 'fe0c119c-44aa-4634-a2cb-3f1e0e987f8f';
+const DEFAULT_SMS_TOKEN = '681f0d5d-024e-452d-bbbc-6595b974c478';
 const DEFAULT_SMS_ENDPOINT = '/smsgw';
 
 export interface SmsSectionProps {
@@ -10,11 +10,52 @@ export interface SmsSectionProps {
   showNotification: (msg: string, type: 'success' | 'error') => void;
   smsToken?: string;
   smsEndpoint?: string;
+  smsIp?: string;
 }
 
-export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNotification, smsToken, smsEndpoint }) => {
-  const SMS_TOKEN = smsToken || (typeof window !== 'undefined' ? localStorage.getItem('smsToken') || DEFAULT_SMS_TOKEN : DEFAULT_SMS_TOKEN);
-  const SMS_ENDPOINT = smsEndpoint || DEFAULT_SMS_ENDPOINT;
+const resolveSmsEndpoint = (endpoint?: string, ip?: string): string => {
+  const ep = (endpoint || '').trim();
+  const host = (ip || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  // Absolute URL wins
+  if (ep.startsWith('http://') || ep.startsWith('https://')) return ep;
+  // Custom relative path (not default) — use as-is; if host provided and ep is default, host takes over
+  if (ep && ep !== '/smsgw' && ep !== '/' ) return ep;
+  if (host) return `http://${host}`;
+  return ep || DEFAULT_SMS_ENDPOINT;
+};
+
+const resolveSmsToken = (token?: string): string => {
+  if (token && token.trim()) return token.trim();
+  if (typeof window !== 'undefined') {
+    try {
+      const ls = localStorage.getItem('smsToken');
+      if (ls && ls.trim()) return ls.trim();
+      // Fallback to schoolSettings stored token
+      const ss = localStorage.getItem('schoolSettings');
+      if (ss) {
+        const parsed = JSON.parse(ss);
+        if (parsed.smsToken) return parsed.smsToken;
+      }
+    } catch {}
+  }
+  return DEFAULT_SMS_TOKEN;
+};
+
+export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNotification, smsToken, smsEndpoint, smsIp }) => {
+  const SMS_TOKEN = resolveSmsToken(smsToken);
+  const SMS_ENDPOINT = resolveSmsEndpoint(smsEndpoint, smsIp);
+  const isDev = (import.meta as any).env?.DEV;
+  const getSmsFetchInfo = (): { url: string; extraHeaders: Record<string, string> } => {
+    if (isDev) {
+      // In dev (localhost:5173) browsers block cross-origin to 192.168.x.x — always proxy via /smsgw
+      if (SMS_ENDPOINT.startsWith('http://') || SMS_ENDPOINT.startsWith('https://')) {
+        return { url: '/smsgw', extraHeaders: { 'X-SMS-Target': SMS_ENDPOINT } };
+      }
+      // Relative like /smsgw — also goes via proxy, plugin will use default or header host
+      return { url: SMS_ENDPOINT, extraHeaders: {} };
+    }
+    return { url: SMS_ENDPOINT, extraHeaders: {} };
+  };
   const [mode, setMode] = useState<'single' | 'bulk'>('single');
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
@@ -33,11 +74,13 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
 
   const sendOne = useCallback(async () => {
     if (!phone.trim() || !message.trim()) { showNotification('Phone and message required', 'error'); return; }
+    if (!SMS_TOKEN) { showNotification('SMS Token missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
     setSending(true);
     try {
-      const res = await fetch(SMS_ENDPOINT, {
+      const { url: fetchUrl, extraHeaders } = getSmsFetchInfo();
+      const res = await fetch(fetchUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': SMS_TOKEN },
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': SMS_TOKEN, ...extraHeaders },
         body: JSON.stringify({ to: phone.trim(), message: message.trim() })
       });
       const text = await res.text();
@@ -52,7 +95,7 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
     } finally {
       setSending(false);
     }
-  }, [phone, message, showNotification]);
+  }, [phone, message, showNotification, SMS_TOKEN, SMS_ENDPOINT]);
 
   const getUnpaidAmount = (s: any): number => {
     const sf = fees.filter((f: any) => f.studentId === s.autoId || (s.secondaryAutoId && f.secondaryAutoId === s.secondaryAutoId));
@@ -112,18 +155,21 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
   const runBulk = useCallback(async () => {
     if (recipients.length === 0) { showNotification('No recipients found', 'error'); return; }
     if (!message.trim()) { showNotification('Message template required — use {name} {amount}', 'error'); return; }
+    if (!SMS_TOKEN) { showNotification('SMS Token missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
     if (!confirm(`Send to ${recipients.length} recipients? There is a 10-second gap between messages.`)) return;
     setSending(true);
     setBulkProgress({ sent: 0, total: recipients.length, failed: 0 });
     setBulkResults([]);
     const results: string[] = [];
+    // In dev, resolve once and reuse for all bulk sends (same gateway)
+    const bulkFetchInfo = getSmsFetchInfo();
     for (let i = 0; i < recipients.length; i++) {
       const s = recipients[i];
       const msg = replacePlaceholders(message, s);
       try {
-        const res = await fetch(SMS_ENDPOINT, {
+        const res = await fetch(bulkFetchInfo.url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': SMS_TOKEN },
+          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': SMS_TOKEN, ...bulkFetchInfo.extraHeaders },
           body: JSON.stringify({ to: s.parentPhone || '', message: msg })
         });
         const text = await res.text();
@@ -139,10 +185,16 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
     setBulkProgress(prev => ({ ...prev, failed: results.length }));
     showNotification(`Sent: ${recipients.length - results.length} · Failed: ${results.length}`, results.length > 0 ? 'error' : 'success');
     setSending(false);
-  }, [recipients, message, showNotification]);
+  }, [recipients, message, showNotification, SMS_TOKEN, SMS_ENDPOINT]);
 
+  const proxyActive = isDev && (SMS_ENDPOINT.startsWith('http://') || SMS_ENDPOINT.startsWith('https://'));
+  const displayEndpoint = proxyActive ? `${SMS_ENDPOINT} (via dev proxy /smsgw)` : SMS_ENDPOINT;
   return (
     <div className="space-y-6">
+      <div className="bg-[#1E1E1E] rounded-xl border border-gray-800 p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2 text-gray-400"><FiSend className="text-cyan-400" /> Gateway: <code className="bg-gray-800 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-xs break-all" title={proxyActive ? `Dev proxy: /smsgw → ${SMS_ENDPOINT} (header X-SMS-Target)` : SMS_ENDPOINT}>{displayEndpoint}</code> <span className="hidden sm:inline text-gray-500">• Token: {SMS_TOKEN ? `${SMS_TOKEN.slice(0,6)}…${SMS_TOKEN.slice(-4)}` : '(empty)'} {SMS_TOKEN ? '✓' : '⚠ missing'}</span>{proxyActive && <span className="hidden lg:inline text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">dev proxy active — no CORS</span>}</div>
+        <span className="text-[11px] text-gray-500">Edit in <b>School Settings → SMS Gateway</b> (Save persists to Firebase)</span>
+      </div>
       <div className="flex gap-2 mb-4">
         <button onClick={() => setMode('single')} className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${mode === 'single' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20' : 'bg-[#1E1E1E] border border-gray-800 text-gray-300'}`}>Single</button>
         <button onClick={() => setMode('bulk')} className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${mode === 'bulk' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20' : 'bg-[#1E1E1E] border border-gray-800 text-gray-300'}`}>Bulk</button>

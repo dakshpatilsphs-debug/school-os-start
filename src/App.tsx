@@ -126,13 +126,37 @@ const App: React.FC = () => {
       offerAck: 'I acknowledge and accept the terms and conditions mentioned above.',
       smsToken: '681f0d5d-024e-452d-bbbc-6595b974c478',
       smsEndpoint: '/smsgw',
+      smsIp: '10.205.244.156:8082',
     };
     if (saved) {
-      const parsed = JSON.parse(saved);
-      return { ...defaults, ...parsed };
+      try {
+        const parsed = JSON.parse(saved);
+        // Migrate legacy smsToken stored separately via localStorage 'smsToken'
+        const legacyToken = (() => { try { return localStorage.getItem('smsToken'); } catch { return null; } })();
+        const legacyEndpoint = (() => { try { return localStorage.getItem('smsEndpoint'); } catch { return null; } })();
+        const merged = { ...defaults, ...parsed };
+        if (legacyToken && !parsed.smsToken) merged.smsToken = legacyToken;
+        if (legacyEndpoint && !parsed.smsEndpoint) merged.smsEndpoint = legacyEndpoint;
+        // Backfill smsIp from endpoint if missing: extract host from absolute URL
+        if (!merged.smsIp && merged.smsEndpoint && merged.smsEndpoint.startsWith('http')) {
+          try { const u = new URL(merged.smsEndpoint); merged.smsIp = u.host; } catch {}
+        } else if (!merged.smsIp && merged.smsEndpoint === '/smsgw') {
+          merged.smsIp = defaults.smsIp;
+        }
+        return merged;
+      } catch {
+        return defaults;
+      }
     }
+    // Also honor legacy smsToken if no schoolSettings yet
+    try {
+      const legacy = localStorage.getItem('smsToken');
+      if (legacy) return { ...defaults, smsToken: legacy };
+    } catch {}
     return defaults;
   });
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const [studentForm, setStudentForm] = useState<Student>({ autoId: 'STU-AUTO', name: '', rollNumber: '', class: '', parentName: '', parentPhone: '', email: '', address: '', dateOfBirth: '', gender: 'MALE', admissionDate: '', status: 'ACTIVE', package: 'Basic', feeAmount: 16000, emiMonths: 1, submittedDocuments: [] });
   const [classes, setClasses] = useState<string[]>(() => { const s = localStorage.getItem('schoolClasses'); return s ? JSON.parse(s) : ['NUR.', 'JR.KG', 'SR.KG', '1 ST',"2 ND","3 RD","4 TH",]; });
@@ -663,41 +687,102 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('schoolPackages', JSON.stringify(packages)); }, [packages]);
   useEffect(() => { localStorage.setItem('schoolDocumentOptions', JSON.stringify(documentOptions)); }, [documentOptions]);
   useEffect(() => { localStorage.setItem('schoolSettings', JSON.stringify(schoolSettings)); }, [schoolSettings]);
+
+  // Load ALL settings (schoolSettings) from Firebase on mount — SMS included (unified node settings/school, fallback to legacy settings/sms)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { getSmsSettings } = await import('./firebase');
-        const remote = await getSmsSettings();
-        if (!cancelled && remote && (remote.smsToken || remote.smsEndpoint)) {
+        const { getSchoolSettings, getSmsSettings } = await import('./firebase');
+        const remoteSchool: any = await getSchoolSettings().catch(() => null);
+        const remoteSms: any = remoteSchool ? null : await getSmsSettings().catch(() => null);
+        const remote = remoteSchool || remoteSms;
+        if (!cancelled && remote) {
           setSchoolSettings(prev => {
             const merged: any = { ...prev };
             let changed = false;
-            if (remote.smsToken && remote.smsToken !== prev.smsToken) { merged.smsToken = remote.smsToken; changed = true; }
-            if (remote.smsEndpoint && remote.smsEndpoint !== prev.smsEndpoint) { merged.smsEndpoint = remote.smsEndpoint; changed = true; }
-            if (changed) try { localStorage.setItem('smsToken', remote.smsToken); } catch {}
+            // Full school settings merge (when getSchoolSettings returned)
+            if (remoteSchool) {
+              for (const k of Object.keys(remoteSchool)) {
+                if (k === 'updatedAt') continue;
+                if (remoteSchool[k] !== undefined && remoteSchool[k] !== null && remoteSchool[k] !== prev[k]) {
+                  merged[k] = remoteSchool[k];
+                  changed = true;
+                }
+              }
+              // Backfill smsIp from endpoint if missing in local
+              if (!merged.smsIp && merged.smsEndpoint && String(merged.smsEndpoint).startsWith('http')) {
+                try { const u = new URL(merged.smsEndpoint); merged.smsIp = u.host; changed = true; } catch {}
+              }
+            } else {
+              // Legacy SMS-only payload
+              if (remote.smsToken && remote.smsToken !== prev.smsToken) { merged.smsToken = remote.smsToken; changed = true; }
+              if (remote.smsEndpoint && remote.smsEndpoint !== prev.smsEndpoint) { merged.smsEndpoint = remote.smsEndpoint; changed = true; }
+              if ((remote as any).smsIp && (remote as any).smsIp !== (prev as any).smsIp) { merged.smsIp = (remote as any).smsIp; changed = true; }
+            }
+            if (changed) {
+              try { localStorage.setItem('schoolSettings', JSON.stringify(merged)); } catch {}
+              try { if (merged.smsToken) localStorage.setItem('smsToken', merged.smsToken); } catch {}
+              try { if (merged.smsEndpoint) localStorage.setItem('smsEndpoint', merged.smsEndpoint); } catch {}
+            }
             return changed ? merged : prev;
           });
         }
       } catch {}
+      if (!cancelled) setSettingsLoaded(true);
     })();
     return () => { cancelled = true; };
   }, []);
-  const prevSmsRef = React.useRef<{ smsToken?: string; smsEndpoint?: string }>({});
-  useEffect(() => {
-    const cur = { smsToken: (schoolSettings as any).smsToken, smsEndpoint: (schoolSettings as any).smsEndpoint };
-    const prev = prevSmsRef.current;
-    if (prev.smsToken === cur.smsToken && prev.smsEndpoint === cur.smsEndpoint) return;
-    prevSmsRef.current = cur;
-    if (!cur.smsToken && !cur.smsEndpoint) return;
-    (async () => {
-      try {
-        const { saveSmsSettings } = await import('./firebase');
-        await saveSmsSettings({ smsToken: cur.smsToken || '', smsEndpoint: cur.smsEndpoint || '/smsgw' });
-        try { if (cur.smsToken) localStorage.setItem('smsToken', cur.smsToken); } catch {}
-      } catch {}
-    })();
-  }, [(schoolSettings as any).smsToken, (schoolSettings as any).smsEndpoint]);
+
+  // Persist ALL settings to Firebase (and localStorage) when user clicks Save — also keeps sms nodes in sync
+  const handleSaveSchoolSettings = useCallback(async () => {
+    // Basic validation: schoolName required
+    if (!schoolSettings.schoolName?.trim()) {
+      showNotification('School Name is required', 'error');
+      return false;
+    }
+    setSettingsSaving(true);
+    try {
+      // Normalize SMS fields before persist
+      const normalized: any = { ...schoolSettings };
+      // Trim token
+      if (typeof normalized.smsToken === 'string') normalized.smsToken = normalized.smsToken.trim();
+      // Normalize endpoint: if user typed bare IP like "10.0.0.1:8082" or "192.168.1.50" without protocol, prefix http://
+      if (typeof normalized.smsEndpoint === 'string') {
+        let ep = normalized.smsEndpoint.trim();
+        if (ep && !ep.startsWith('/') && !ep.startsWith('http://') && !ep.startsWith('https://')) {
+          // looks like host:port or host — prefix http://
+          if (/^[\w.-]+:\d+(\/.*)?$/.test(ep) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(ep)) ep = 'http://' + ep;
+          else if (!ep.includes('://') && !ep.startsWith('/')) ep = '/' + ep.replace(/^\/+/, '');
+        }
+        normalized.smsEndpoint = ep || '/smsgw';
+      }
+      // Derive smsIp from endpoint if ip empty, or keep explicit ip and sync endpoint when endpoint is default
+      if (typeof normalized.smsIp === 'string') normalized.smsIp = normalized.smsIp.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      if (normalized.smsIp && normalized.smsEndpoint === '/smsgw') {
+        normalized.smsEndpoint = 'http://' + normalized.smsIp.replace(/^https?:\/\//, '');
+      } else if (normalized.smsEndpoint && normalized.smsEndpoint.startsWith('http') && !normalized.smsIp) {
+        try { const u = new URL(normalized.smsEndpoint); normalized.smsIp = u.host; } catch {}
+      }
+
+      // Persist locally immediately so refresh works offline
+      try { localStorage.setItem('schoolSettings', JSON.stringify(normalized)); } catch {}
+      try { localStorage.setItem('smsToken', normalized.smsToken || ''); } catch {}
+      try { localStorage.setItem('smsEndpoint', normalized.smsEndpoint || ''); } catch {}
+      try { localStorage.setItem('smsIp', normalized.smsIp || ''); } catch {}
+
+      const { saveSchoolSettings } = await import('./firebase');
+      await saveSchoolSettings(normalized);
+      setSchoolSettings(normalized);
+      showNotification('Settings saved successfully', 'success');
+      return true;
+    } catch (error: any) {
+      showFirebaseError(error, 'Failed to save settings');
+      return false;
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, [schoolSettings, showNotification, showFirebaseError]);
   useEffect(() => { setShowAllStudents(false); setShowAllFees(false); setShowAllFeesByStudent(false); setShowAllExpenses(false); setShowAllEmployees(false); }, [searchTerm]);
 
   // Filter locally loaded fees/expenses by year (dates stored as YYYY-MM-DD strings)
@@ -4463,7 +4548,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} forceFeeForm={forceFeeForm} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} />}
+      {showModal && activeTab !== 'equipments' && <AppModals modalTitle={modalTitle} onClose={closeModal} showClassMgmt={showClassMgmt} showPackageMgmt={showPackageMgmt} showSettings={showSettings} showOfferLetterSettings={showOfferLetterSettings} setShowClassMgmt={setShowClassMgmt} setShowPackageMgmt={setShowPackageMgmt} setShowSettings={setShowSettings} setShowOfferLetterSettings={setShowOfferLetterSettings} setShowModal={(v) => { if (v) setShowModal(true); else closeModal(); }} activeTab={activeTab} forceFeeForm={forceFeeForm} modalType={modalType} billFile={billFile} uploading={uploading} handleBillUpload={handleBillUpload} previewBill={previewBill} studentForm={studentForm} setStudentForm={setStudentForm} classes={classes} packages={packages} isCustomPackage={isCustomPackage} customPackageAmount={customPackageAmount} setCustomPackageAmount={setCustomPackageAmount} handleAutoCaps={handleAutoCaps} handlePackageChange={handlePackageChange} handleSaveStudent={handleSaveStudent} newClassName={newClassName} setNewClassName={setNewClassName} handleAddClass={handleAddClass} handleRemoveClass={handleRemoveClass} newPackageName={newPackageName} setNewPackageName={setNewPackageName} newPackageAmount={newPackageAmount} setNewPackageAmount={setNewPackageAmount} handleAddPackage={handleAddPackage} handleRemovePackage={handleRemovePackage} feeForm={feeForm} setFeeForm={setFeeForm} students={students} selectedStudentForFee={selectedStudentForFee} feeClassFilter={feeClassFilter} setFeeClassFilter={setFeeClassFilter} setSelectedStudentForFee={setSelectedStudentForFee} handleStudentSelection={handleStudentSelection} handleSaveFee={handleSaveFee} expenseForm={expenseForm} setExpenseForm={setExpenseForm} employees={employees} handleEmployeeSelectionForExpense={handleEmployeeSelectionForExpense} handleSaveExpense={handleSaveExpense} employeeForm={employeeForm} setEmployeeForm={setEmployeeForm} handleSaveEmployee={handleSaveEmployee} showDocumentMgmt={showDocumentMgmt} setShowDocumentMgmt={setShowDocumentMgmt} documentOptions={documentOptions} newDocumentName={newDocumentName} setNewDocumentName={setNewDocumentName} handleAddDocumentOption={handleAddDocumentOption} handleRemoveDocumentOption={handleRemoveDocumentOption} schoolSettings={schoolSettings} setSchoolSettings={setSchoolSettings} onSaveSchoolSettings={handleSaveSchoolSettings} settingsSaving={settingsSaving} />}
 
       <div className="sticky top-0 left-0 w-full backdrop-blur-md border-b px-6 py-4 flex flex-wrap items-center gap-3 z-40" style={{ backgroundColor: 'color-mix(in srgb, var(--bg-neu) 92%, transparent)', borderColor: 'rgba(255,255,255,0.06)', boxShadow: '0 4px 24px color-mix(in srgb, var(--dark-shadow) 45%, transparent)' }}>
         <div className="text-xl font-display font-extrabold tracking-tight flex items-center gap-3" style={{ color: 'var(--text-neu)' }}><div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%)', boxShadow: '5px 5px 12px var(--dark-shadow), -4px -4px 10px var(--light-shadow)', border: '1px solid rgba(255,255,255,0.14)' }}><SchoolLogo size={22} /></div><span>School OS</span>{isAdminMode && <span className="ml-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 border border-amber-500/20">Admin Reports</span>}</div>
@@ -5392,7 +5477,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'sms' && (<SmsSection students={students} fees={fees} showNotification={showNotification} smsToken={schoolSettings.smsToken || '681f0d5d-024e-452d-bbbc-6595b974c478'} smsEndpoint={schoolSettings.smsEndpoint || '/smsgw'} />)}
+        {activeTab === 'sms' && (<SmsSection students={students} fees={fees} showNotification={showNotification} smsToken={schoolSettings.smsToken || '681f0d5d-024e-452d-bbbc-6595b974c478'} smsEndpoint={schoolSettings.smsEndpoint || '/smsgw'} smsIp={(schoolSettings as any).smsIp || ''} />)}
           </motion.div>
         </AnimatePresence>
 
