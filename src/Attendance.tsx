@@ -1294,33 +1294,34 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
             <>
               {/* Salary Calculation Table */}
               <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
-                <div className="flex flex-col md:flex-row justify-between md:items-center gap-3 p-6 pb-4">
+                <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 p-6 pb-4">
                   <div>
-                    <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-yellow-400" /> Salary Calculation ({selectedMonth})</h3>
-                    <p className="text-xs text-gray-400 mt-1">Salary based on present days. Sundays & holidays auto-excluded.</p>
+                    <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-yellow-400" /> Salary Calculation</h3>
+                    <p className="text-xs text-gray-400 mt-1">Salary based on present days + approved half-days (0.5 CL). Sundays & holidays auto-excluded. Month: <span className="text-cyan-400 font-semibold">{new Date(selectedMonth + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} ({selectedMonth})</span></p>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setShowSalaryCalc(v => !v)} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-5 py-2 rounded-xl self-start">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="p-2.5 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
+                    <button onClick={() => setShowSalaryCalc(v => !v)} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-cyan-500/50 px-5 py-2 rounded-xl">
                       {showSalaryCalc ? <FiEyeOff size={16} /> : <FiEye size={16} />}{showSalaryCalc ? 'Hide' : 'Show'}
                     </button>
-                    <button onClick={exportMonthlySalaryReport} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-5 py-2 rounded-xl self-start"><FiDownload size={16} />Monthly Salary Report (Excel)</button>
-                    <button onClick={exportAttendanceExpensePDF} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-5 py-2 rounded-xl self-start"><FiFileText size={16} />Attendance Expense (PDF)</button>
+                    <button onClick={exportMonthlySalaryReport} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-emerald-500/50 px-5 py-2 rounded-xl"><FiDownload size={16} />Salary Excel</button>
+                    <button onClick={exportAttendanceExpensePDF} className="flex items-center justify-center gap-2 bg-[#1E1E1E] border border-gray-800 hover:border-red-500/50 px-5 py-2 rounded-xl"><FiFileText size={16} />Expense PDF</button>
                   </div>
                 </div>
                 {showSalaryCalc && (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+                <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-800">
+                  <table className="w-full min-w-[1050px]">
                     <thead className="bg-gray-800/50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Employee</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Present</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Absent</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap hidden md:table-cell">Work Days</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap hidden lg:table-cell">Per Day</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">CL Left</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Earned Salary</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">Direct Pay</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap">PDF</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap sticky left-0 bg-gray-800/80 backdrop-blur z-10">Employee</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Present</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Absent</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Work Days</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 whitespace-nowrap">Per Day</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">CL Left</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 whitespace-nowrap">Earned Salary</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Direct Pay</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">PDF</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1329,9 +1330,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const annualQuota = getEmpClQuota(e);
                         const usedTotal = getClUsedTotal(e.autoId, selectedMonth, attendance);
                         const remainingAnnual = Math.max(0, annualQuota - usedTotal);
-                        const effAbsent = info.absentDays;
+                        const effAbsent = info.absentDays + ((info as any).lateDisapproved ?? 0) * 0.5;
                         const effSalary = info.earnedSalary;
                         const clLeft = remainingAnnual;
+                        const lateApproved = (info as any).lateApproved ?? 0;
+                        const latePending = (info as any).latePending ?? 0;
+                        const lateDisapproved = (info as any).lateDisapproved ?? 0;
                         const paidExpenses = getPaidSalaryExpenses(e, selectedMonth);
                         const paid = paidExpenses.length > 0;
                         return (
@@ -1485,10 +1489,10 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       <p className="text-2xl font-bold text-blue-400">{summ.clUsedThisMonth}</p>
                       <p className="text-xs text-gray-400 mt-1">Used This Month</p>
                     </div>
-                    {summ.pending > 0 ? (
+                    {((summ as any).totalPending ?? summ.pending) > 0 ? (
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-center">
-                        <p className="text-2xl font-bold text-yellow-400">{summ.pending}</p>
-                        <p className="text-xs text-gray-400 mt-1">Pending Decision</p>
+                        <p className="text-2xl font-bold text-yellow-400">{(summ as any).totalPending ?? summ.pending}</p>
+                        <p className="text-xs text-gray-400 mt-1">Pending (Full + Half)</p>
                       </div>
                     ) : (
                       <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
@@ -1521,9 +1525,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                   </div>
 
                   {lateDays > 0 && (
-                    <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-sm">
-                      <FiClock className="text-yellow-400 shrink-0" />
-                      <span className="text-gray-300">{lateDays} late mark{lateDays > 1 ? 's' : ''} this month — uses {lateDays * 0.5} CL ({lateDays * 0.5} day{lateDays * 0.5 === 1 ? '' : 's'}). Late marks already count as present for salary.</span>
+                    <div className="flex flex-col gap-1 bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <FiClock className="text-yellow-400 shrink-0" />
+                        <span className="text-gray-300">{lateDays} half-day (late) mark{lateDays > 1 ? 's' : ''} — {(summ as any).lateApproved ?? 0} approved (0.5 CL each), {(summ as any).latePending ?? 0} pending, {(summ as any).lateDisapproved ?? 0} disapproved (0.5 salary deducted).</span>
+                      </div>
+                      <span className="text-xs text-gray-400 ml-6">Approved half-days use 0.5 CL and count as present. Disapproved half-days deduct 0.5 salary. Pending awaits decision.</span>
                     </div>
                   )}
 
