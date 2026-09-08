@@ -43,8 +43,16 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   logSalarySlipAudit, updateEmployee, handleDirectSalaryPay, deleteSalaryExpenses
 }) => {
   const [subTab, setSubTab] = useState<'employee' | 'holidays' | 'causalLeaves'>('employee');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().split('T')[0].substring(0, 7));
+  const getLocalDateStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const getLocalMonthStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const [selectedDate, setSelectedDate] = useState(() => getLocalDateStr());
+  const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthStr());
   const [selectedMonthlyEmployeeId, setSelectedMonthlyEmployeeId] = useState('');
   const [salaryType, setSalaryType] = useState<'new' | 'old'>('new');
   const [editMonthSalary, setEditMonthSalary] = useState(false);
@@ -1123,8 +1131,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
   // ===== Stats =====
   const filteredEmployees = employees.filter(e => e.status === 'ACTIVE');
-  const todayPresent = attendance.filter(a => a.date === selectedDate && a.personType === 'employee' && a.status === 'present').length;
-  const todayAbsent = attendance.filter(a => a.date === selectedDate && a.personType === 'employee' && a.status === 'absent').length;
+  const todayStr = getLocalDateStr();
+  const todayPresent = attendance.filter(a => a.date === todayStr && a.personType === 'employee' && a.status === 'present').length;
+  const todayAbsent = attendance.filter(a => a.date === todayStr && a.personType === 'employee' && a.status === 'absent').length;
 
   const dayLabel = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const statusInfo = dateStatus(selectedDate);
@@ -1260,7 +1269,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const isLate = status === 'late';
                         const isAbsent = status === 'absent';
                         const isHolidayDay = status === 'holiday';
-                        return <div key={day.dateStr} className={`w-20 shrink-0 rounded-xl border p-2 text-center ${isHolidayDay ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800 border-gray-700'}`}><p className="text-xs text-gray-400">{day.weekday}</p><p className="text-lg font-bold text-white">{day.label}</p>{isHolidayDay ? <div className="mt-2 text-xs text-purple-400 font-bold">Holiday</div> : <div className="mt-2 flex flex-col gap-1"><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'present')} className={`px-2 py-1 rounded text-xs font-bold transition ${isPresent ? 'bg-emerald-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-emerald-600/50'}`}>P</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'late')} className={`px-2 py-1 rounded text-xs font-bold transition ${isLate ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-yellow-600/50'}`}>L</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'absent')} className={`px-2 py-1 rounded text-xs font-bold transition ${isAbsent ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-red-600/50'}`}>A</button></div>}</div>;
+                        const isToday = day.dateStr === getLocalDateStr();
+                        return <div key={day.dateStr} className={`w-20 shrink-0 rounded-xl border p-2 text-center ${isToday ? 'ring-2 ring-cyan-400 border-cyan-400 bg-cyan-500/10' : isHolidayDay ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800 border-gray-700'}`}><p className="text-xs text-gray-400">{day.weekday}</p><p className={`text-lg font-bold ${isToday ? 'text-cyan-400' : 'text-white'}`}>{day.label}{isToday && <span className="ml-1 text-[9px] bg-cyan-500 text-white px-1 py-0.5 rounded">Today</span>}</p>{isHolidayDay ? <div className="mt-2 text-xs text-purple-400 font-bold">Holiday</div> : <div className="mt-2 flex flex-col gap-1"><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'present')} className={`px-2 py-1 rounded text-xs font-bold transition ${isPresent ? 'bg-emerald-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-emerald-600/50'}`}>P</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'late')} className={`px-2 py-1 rounded text-xs font-bold transition ${isLate ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-yellow-600/50'}`}>L</button><button type="button" onClick={() => setMonthlyEmployeeAttendance(selectedEmployee, day.dateStr, 'absent')} className={`px-2 py-1 rounded text-xs font-bold transition ${isAbsent ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-red-600/50'}`}>A</button></div>}</div>;
                       })}
                     </div>
                   </div>
