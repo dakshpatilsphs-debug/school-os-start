@@ -992,7 +992,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ? (employee.monthSalary?.[currentMonth] ?? employee.oldSalary ?? employee.salary)
       : employee.salary;
     const perDaySalary = summ.workingDays > 0 ? monthlySalary / summ.workingDays : 0;
-    // Paid days: 2 lates = 1 present (0.5 each). Approved/pending half-days count as 0.5 present, disapproved counts as 0 (deducted).
+    // Paid days: late counts as present (1) for salary per original spec, but uses 0.5 CL. 2 lates =1 CL (0.5 each). Disapproved half =0.5 deducted.
     const lateApproved = (summ as any).lateApproved ?? 0;
     const latePending = (summ as any).latePending ?? 0;
     const lateDisapproved = (summ as any).lateDisapproved ?? 0;
@@ -1348,7 +1348,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         return (
                           <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3 sticky left-0 bg-[#1E1E1E] z-10 w-[180px] min-w-[180px] max-w-[180px]"><p className="font-semibold text-sm truncate">{e.name}</p><p className="text-xs text-gray-500 truncate">{e.role}</p></td>
-                            <td className="px-4 py-3 text-center sticky left-[180px] bg-[#1E1E1E] z-10 border-l border-gray-700 w-[110px] min-w-[110px]"><div className="flex flex-col items-center"><span className="text-emerald-400 font-bold">{(() => { const eff = info.presentDays + (lateApproved + latePending) * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })()}</span><div className="flex gap-1 text-[10px] leading-none mt-0.5 flex-wrap justify-center">{lateApproved > 0 && <span className="text-yellow-400">+{lateApproved}L✓</span>}{latePending > 0 && <span className="text-yellow-300">+{latePending}L…</span>}{lateDisapproved > 0 && <span className="text-orange-400">+{lateDisapproved}L✗</span>}{info.clCovered > 0 && <span className="text-cyan-400">+{info.clCovered}CL</span>}</div></div></td>
+                            <td className="px-4 py-3 text-center sticky left-[180px] bg-[#1E1E1E] z-10 border-l border-gray-700 w-[110px] min-w-[110px]"><div className="flex flex-col items-center"><span className="text-emerald-400 font-bold">{info.presentDays}</span><div className="flex gap-1 text-[10px] leading-none mt-0.5 flex-wrap justify-center">{lateApproved > 0 && <span className="text-yellow-400">{lateApproved}L✓(0.5)</span>}{latePending > 0 && <span className="text-yellow-300">{latePending}L…(0.5)</span>}{lateDisapproved > 0 && <span className="text-orange-400">{lateDisapproved}L✗</span>}{info.clCovered > 0 && <span className="text-cyan-400">+{info.clCovered}CL</span>}</div></div></td>
                             <td className="px-4 py-3 text-center"><span className="text-red-400 font-semibold">{effAbsent % 1 === 0 ? effAbsent : effAbsent.toFixed(1)}</span></td>
                             <td className="px-4 py-3 text-center text-gray-400">{info.workingDays}</td>
                             <td className="px-4 py-3 text-right text-gray-400">₹{info.perDaySalary.toFixed(0)}</td>
