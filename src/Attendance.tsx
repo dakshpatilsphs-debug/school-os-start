@@ -1002,8 +1002,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const effectiveLateDisapproved = lateDisapproved || 0;
     const hasNewFields = typeof (summ as any).lateApproved === 'number';
     const paidDays = hasNewFields
-      ? summ.present + (effectiveLateApproved + effectiveLatePending) * 0.5 + summ.clApproved
-      : summ.present + summ.late * 0.5 + summ.clApproved;
+      ? summ.present + effectiveLateApproved + effectiveLatePending + summ.clApproved
+      : summ.present + summ.late + summ.clApproved;
     const halfDed = hasNewFields ? effectiveLateDisapproved * 0.5 * perDaySalary : 0;
     const fullDed = summ.absent * perDaySalary;
     const deductions = Math.round(fullDed + halfDed);
