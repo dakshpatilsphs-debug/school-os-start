@@ -1021,7 +1021,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     const usedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
     const remainingAnnual = Math.max(0, annualQuota - usedTotal);
     const perDaySalary = info.perDaySalary;
-    const earnedSalary = Math.round((info.presentDays + info.lateDays + info.clCovered) * perDaySalary);
+    const earnedSalary = info.earnedSalary;
     return {
       school: {
         name: (schoolSettings?.schoolName || 'School OS').toUpperCase(),
