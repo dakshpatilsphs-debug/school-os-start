@@ -1202,6 +1202,7 @@ const App: React.FC = () => {
           amount: Number(expense.amount) || pendingSalary.amount,
           paidTo: expense.paidTo || pendingSalary.paidTo,
           date: expense.date || pendingSalary.date,
+          salaryMonth: month || pendingSalary.salaryMonth,
         });
         loadData();
         showNotification(`Salary for ${pendingSalary.paidTo} marked PAID (${pendingSalary.autoId})`, 'success');
