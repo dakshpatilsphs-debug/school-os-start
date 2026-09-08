@@ -992,21 +992,18 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ? (employee.monthSalary?.[currentMonth] ?? employee.oldSalary ?? employee.salary)
       : employee.salary;
     const perDaySalary = summ.workingDays > 0 ? monthlySalary / summ.workingDays : 0;
-    // Paid days: present + approved CL full days + approved half-days (0.5 each already counted as 0.5? but lateApproved counts as 1 for present)
-    // Late logic: approved/pending late count as present (1), disapproved late counts as 0.5 present (half deduction)
+    // Paid days: 2 lates = 1 present (0.5 each). Approved/pending half-days count as 0.5 present, disapproved counts as 0 (deducted).
     const lateApproved = (summ as any).lateApproved ?? 0;
     const latePending = (summ as any).latePending ?? 0;
     const lateDisapproved = (summ as any).lateDisapproved ?? 0;
     const lateTotal = (summ as any).late ?? 0;
-    // For backward compat where lateApproved not yet computed, fallback to late
     const effectiveLateApproved = lateApproved || 0;
     const effectiveLatePending = latePending || 0;
     const effectiveLateDisapproved = lateDisapproved || 0;
-    // If clUtils is old and doesn't provide breakdown, fallback to counting all late as approved (old behavior)
     const hasNewFields = typeof (summ as any).lateApproved === 'number';
     const paidDays = hasNewFields
-      ? summ.present + effectiveLateApproved + summ.clApproved + effectiveLatePending + effectiveLateDisapproved * 0.5
-      : summ.present + summ.late + summ.clApproved;
+      ? summ.present + (effectiveLateApproved + effectiveLatePending) * 0.5 + summ.clApproved
+      : summ.present + summ.late * 0.5 + summ.clApproved;
     const halfDed = hasNewFields ? effectiveLateDisapproved * 0.5 * perDaySalary : 0;
     const fullDed = summ.absent * perDaySalary;
     const deductions = Math.round(fullDed + halfDed);
@@ -1351,7 +1348,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         return (
                           <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3 sticky left-0 bg-[#1E1E1E] z-10 w-[180px] min-w-[180px] max-w-[180px]"><p className="font-semibold text-sm truncate">{e.name}</p><p className="text-xs text-gray-500 truncate">{e.role}</p></td>
-                            <td className="px-4 py-3 text-center sticky left-[180px] bg-[#1E1E1E] z-10 border-l border-gray-700 w-[110px] min-w-[110px]"><div className="flex flex-col items-center"><span className="text-emerald-400 font-bold">{info.presentDays}</span><div className="flex gap-1 text-[10px] leading-none mt-0.5 flex-wrap justify-center">{lateApproved > 0 && <span className="text-yellow-400">+{lateApproved}L✓</span>}{latePending > 0 && <span className="text-yellow-300">+{latePending}L…</span>}{lateDisapproved > 0 && <span className="text-orange-400">+{lateDisapproved}L✗</span>}{info.clCovered > 0 && <span className="text-cyan-400">+{info.clCovered}CL</span>}</div></div></td>
+                            <td className="px-4 py-3 text-center sticky left-[180px] bg-[#1E1E1E] z-10 border-l border-gray-700 w-[110px] min-w-[110px]"><div className="flex flex-col items-center"><span className="text-emerald-400 font-bold">{(() => { const eff = info.presentDays + (lateApproved + latePending) * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })()}</span><div className="flex gap-1 text-[10px] leading-none mt-0.5 flex-wrap justify-center">{lateApproved > 0 && <span className="text-yellow-400">+{lateApproved}L✓</span>}{latePending > 0 && <span className="text-yellow-300">+{latePending}L…</span>}{lateDisapproved > 0 && <span className="text-orange-400">+{lateDisapproved}L✗</span>}{info.clCovered > 0 && <span className="text-cyan-400">+{info.clCovered}CL</span>}</div></div></td>
                             <td className="px-4 py-3 text-center"><span className="text-red-400 font-semibold">{effAbsent % 1 === 0 ? effAbsent : effAbsent.toFixed(1)}</span></td>
                             <td className="px-4 py-3 text-center text-gray-400">{info.workingDays}</td>
                             <td className="px-4 py-3 text-right text-gray-400">₹{info.perDaySalary.toFixed(0)}</td>
