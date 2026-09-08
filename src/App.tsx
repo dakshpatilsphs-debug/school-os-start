@@ -39,7 +39,7 @@ import { exportProperExcel, studentColumns, feeColumns, expenseColumns, employee
 
 type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai' | 'sms';
 
-import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered } from './clUtils';
+import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered, getCurrentMonthKey as getClCurrentMonth, getEarnedSalaryForMonth } from './clUtils';
 
 const App: React.FC = () => {
   const isAdminMode = (import.meta as any).env?.VITE_ADMIN_MODE === 'true';
@@ -5021,7 +5021,7 @@ const App: React.FC = () => {
                 const ei = getEmployeeExpenseInfo(e);
                 return (<tr key={e.id} className={`border-t border-gray-800 hover:bg-gray-800/30 transition ${e.hidden ? 'opacity-50' : ''}`}>
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4 font-semibold">{e.name}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{e.role}</span></td><td className="px-6 py-4 hidden xl:table-cell text-gray-400">{e.department || '—'}</td>
-                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{Math.max(0, (e.salary || 0) - ((e.monthDeduction?.[getMonthKey(new Date())] ?? e.otherDeduction) || 0)).toLocaleString()}{((e.monthDeduction?.[getMonthKey(new Date())] ?? e.otherDeduction) || 0) > 0 && <p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()}</p>}</td>
+                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{(() => { const cm = getClCurrentMonth(); const { earned } = getEarnedSalaryForMonth(e, cm, attendance, holidays); const ded = e.monthDeduction?.[cm] ?? e.otherDeduction ?? 0; return Math.max(0, earned - ded).toLocaleString(); })()}<p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()} • Earned ₹{getEarnedSalaryForMonth(e, getClCurrentMonth(), attendance, holidays).earned.toLocaleString()}</p></td>
                   <td className="px-6 py-4">
                     <div className="relative flex items-center gap-2">
                       <button onClick={() => { if (deductPopoverEmpId === e.id) { setDeductPopoverEmpId(''); return; } openDeductPopover(e); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition" title="Add/Edit monthly deduction"> <FiMinus size={13} /> Deduct</button>

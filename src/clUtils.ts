@@ -149,3 +149,22 @@ export const getMonthAttSummary = (empId: string, monthKey: string, attendance: 
     clUsedThisMonth,
   };
 };
+
+export const getEarnedSalaryForMonth = (emp: Employee, monthKey: string, attendance: Attendance[], holidays?: Holiday[], salaryOverride?: number): { earned: number; perDay: number; paidDays: number; deductions: number; workingDays: number } => {
+  const summ = getMonthAttSummary(emp.autoId, monthKey, attendance, holidays);
+  const monthlySalary = salaryOverride ?? emp.salary ?? 0;
+  const perDay = summ.workingDays > 0 ? monthlySalary / summ.workingDays : 0;
+  // If no records yet for this month (e.g., new month, no attendance marked), assume full present (no deduction) — matches expectation that salary is original until absences are marked
+  if (summ.records.length === 0) {
+    return { earned: monthlySalary, perDay, paidDays: summ.workingDays, deductions: 0, workingDays: summ.workingDays };
+  }
+  const lateApproved = (summ as any).lateApproved ?? 0;
+  const latePending = (summ as any).latePending ?? 0;
+  const lateDisapproved = (summ as any).lateDisapproved ?? 0;
+  const paidDays = summ.present + (lateApproved + latePending) * 0.5 + summ.clApproved;
+  const earned = Math.round(paidDays * perDay);
+  const halfDed = lateDisapproved * 0.5 * perDay;
+  const fullDed = summ.absent * perDay;
+  const deductions = Math.round(fullDed + halfDed);
+  return { earned, perDay, paidDays, deductions, workingDays: summ.workingDays };
+};
