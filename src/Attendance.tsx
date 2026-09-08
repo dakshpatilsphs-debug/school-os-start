@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Employee, Attendance as Att, Holiday, Expense } from './types';
 import type { SalarySlipData } from './salarySlipTypes';
-import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, getMonthAttSummary, isClCovered } from './clUtils';
+import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, getMonthAttSummary, isClCovered, isClPending, isLateClCovered, isLatePending } from './clUtils';
 import { exportProperExcel } from './utils/excelHelper';
 
 interface AttendanceProps {
@@ -44,6 +44,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 }) => {
   const [subTab, setSubTab] = useState<'employee' | 'holidays' | 'causalLeaves'>('employee');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().split('T')[0].substring(0, 7));
   const [selectedMonthlyEmployeeId, setSelectedMonthlyEmployeeId] = useState('');
   const [salaryType, setSalaryType] = useState<'new' | 'old'>('new');
   const [editMonthSalary, setEditMonthSalary] = useState(false);
@@ -265,8 +266,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   };
 
   const exportMonthlySalaryReport = () => {
-    const currentMonth = selectedDate.substring(0, 7);
-    const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const currentMonth = selectedMonth;
+    const monthName = new Date(selectedMonth + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const activeEmps = employees.filter(e => e.status === 'ACTIVE');
     if (activeEmps.length === 0) { showNotification('No active employees', 'error'); return; }
     const data = activeEmps.map(e => {
@@ -378,7 +379,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
   // ===== Monthly Attendance Grid Helpers =====
   const getMonthInfo = () => {
-    const currentMonth = selectedDate.substring(0, 7); // YYYY-MM
+    const currentMonth = selectedMonth; // YYYY-MM — dedicated month picker for monthly views
     const [year, month] = currentMonth.split('-').map(Number);
     const daysInMonth = new Date(year, month, 0).getDate();
     const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -397,7 +398,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   };
 
   const getSelectedMonthDays = () => {
-    const currentMonth = selectedDate.substring(0, 7);
+    const currentMonth = selectedMonth;
     const [year, month] = currentMonth.split('-').map(Number);
     const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -850,7 +851,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ['Medical Allowance', 'Rs 0'],
       ['Conveyance Allowance', 'Rs 0'],
     ];
-    const otherDed = salaryData ? (salaryData.salary.deductions || 0) : ((emp.monthDeduction?.[selectedDate.substring(0, 7)] ?? emp.otherDeduction) || 0);
+    const otherDed = salaryData ? (salaryData.salary.deductions || 0) : ((emp.monthDeduction?.[selectedMonth] ?? emp.otherDeduction) || 0);
     const deductItems: [string, string][] = [
       ['EPF(%)', 'Rs 0'],
       ['PF(%)', 'Rs 0'],
@@ -974,27 +975,42 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     }
   };
 
-  // ===== Salary Calculation for Employees =====
+  // ===== Salary Calculation for Employees — updated for half-day (0.5 CL) approval =====
   const getEmployeeSalaryInfo = (employee: Employee) => {
-    const currentMonth = selectedDate.substring(0, 7); // YYYY-MM
+    const currentMonth = selectedMonth; // YYYY-MM
     const summ = getMonthAttSummary(employee.autoId, currentMonth, attendance, holidays);
 
-    // Salary based on present+late+CL-covered days out of working days; approved CL is fully paid
     const monthlySalary = salaryType === 'old'
       ? (employee.monthSalary?.[currentMonth] ?? employee.oldSalary ?? employee.salary)
       : employee.salary;
     const perDaySalary = summ.workingDays > 0 ? monthlySalary / summ.workingDays : 0;
-    const paidDays = summ.present + summ.late + summ.clApproved;
+    // Paid days: present + approved CL full days + approved half-days (0.5 each already counted as 0.5? but lateApproved counts as 1 for present)
+    // Late logic: approved/pending late count as present (1), disapproved late counts as 0.5 present (half deduction)
+    const lateApproved = (summ as any).lateApproved ?? 0;
+    const latePending = (summ as any).latePending ?? 0;
+    const lateDisapproved = (summ as any).lateDisapproved ?? 0;
+    const lateTotal = (summ as any).late ?? 0;
+    // For backward compat where lateApproved not yet computed, fallback to late
+    const effectiveLateApproved = lateApproved || 0;
+    const effectiveLatePending = latePending || 0;
+    const effectiveLateDisapproved = lateDisapproved || 0;
+    // If clUtils is old and doesn't provide breakdown, fallback to counting all late as approved (old behavior)
+    const hasNewFields = typeof (summ as any).lateApproved === 'number';
+    const paidDays = hasNewFields
+      ? summ.present + effectiveLateApproved + summ.clApproved + effectiveLatePending + effectiveLateDisapproved * 0.5
+      : summ.present + summ.late + summ.clApproved;
+    const halfDed = hasNewFields ? effectiveLateDisapproved * 0.5 * perDaySalary : 0;
+    const fullDed = summ.absent * perDaySalary;
+    const deductions = Math.round(fullDed + halfDed);
     const earnedSalary = Math.round(paidDays * perDaySalary);
-    const deductions = Math.round(summ.absent * perDaySalary);
     const netSalary = earnedSalary;
 
-    return { presentDays: summ.present, lateDays: summ.late, absentDays: summ.absent, clCovered: summ.clApproved, paidDays, workingDays: summ.workingDays, monthlySalary, perDaySalary, earnedSalary, deductions, netSalary };
+    return { presentDays: summ.present, lateDays: lateTotal, absentDays: summ.absent, clCovered: summ.clApproved, paidDays, workingDays: summ.workingDays, monthlySalary, perDaySalary, earnedSalary, deductions, netSalary, lateApproved: effectiveLateApproved, latePending: effectiveLatePending, lateDisapproved: effectiveLateDisapproved };
   };
 
   const getSalarySlipDataForAttend = (emp: Employee, _clCount: number = 0): SalarySlipData => {
-    const currentMonth = selectedDate.substring(0, 7);
-    const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const currentMonth = selectedMonth;
+    const monthName = new Date(selectedMonth + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const info = getEmployeeSalaryInfo(emp);
     const annualQuota = getEmpClQuota(emp);
     const usedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
@@ -1063,7 +1079,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   // ===== Salary Breakdown (Earnings + Deductions components) =====
   // ===== Simplified Salary Calculation (earned salary based on attendance) =====
   const getSalaryBreakdown = (emp: Employee, si: any) => {
-    const currentMonth = selectedDate.substring(0, 7);
+    const currentMonth = selectedMonth;
     const gross = salaryType === 'old'
       ? (emp.monthSalary?.[currentMonth] ?? emp.oldSalary ?? emp.salary)
       : emp.salary;
@@ -1075,7 +1091,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
   // ===== Direct Pay (add salary as expense) =====
   const openDirectPay = (emp: Employee, amount: number) => {
     if (isReadOnly) { showNotification('Read-only mode: cannot add expense', 'error'); return; }
-    const currentMonth = selectedDate.substring(0, 7);
+    const currentMonth = selectedMonth;
     const otherDed = (emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0;
     const netPay = Math.max(0, amount - otherDed);
     setDirectPay({ emp, amount: netPay });
@@ -1084,8 +1100,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
 
   const confirmDirectPay = async () => {
     if (!directPay || !handleDirectSalaryPay) return;
-    const currentMonth = selectedDate.substring(0, 7);
-    const monthName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const currentMonth = selectedMonth;
+    const monthName = new Date(selectedMonth + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const expense = {
       category: 'Salaries',
       amount: Number(directPayAmount) || 0,
@@ -1193,7 +1209,11 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                   {filteredEmployees.sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name)).map(e => <option key={e.id} value={e.autoId}>{e.role} | {e.autoId} - {e.name}</option>)}
                 </select>
               </div>
-              <div className="text-xs text-gray-400">Month: <span className="text-cyan-400 font-semibold">{getMonthInfo().monthName}</span></div>
+              <div className="space-y-1 min-w-[180px]">
+                <label className="text-xs text-cyan-400">Month</label>
+                <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
+                <p className="text-xs text-gray-400">Month: <span className="text-cyan-400 font-semibold">{getMonthInfo().monthName}</span></p>
+              </div>
             </div>
 
             {selectedMonthlyEmployeeId && (() => {
@@ -1212,7 +1232,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       <button type="button" onClick={() => { setSalaryType('new'); setEditMonthSalary(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'new' ? 'bg-cyan-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>New (₹{selectedEmployee.salary?.toLocaleString()})</button>
                       <button type="button" onClick={() => { setSalaryType('old'); setSelectedMonthlyEmployeeId(''); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${salaryType === 'old' ? 'bg-yellow-500 text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>Old</button>
                       {salaryType === 'old' && !editMonthSalary && (
-                        <button type="button" onClick={() => { const cur = selectedEmployee.monthSalary?.[selectedDate.substring(0, 7)]; setMonthSalaryInput(String(cur ?? selectedEmployee.oldSalary ?? selectedEmployee.salary ?? '')); setEditMonthSalary(true); }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30 transition">Update Salary for Month</button>
+                        <button type="button" onClick={() => { const cur = selectedEmployee.monthSalary?.[selectedMonth]; setMonthSalaryInput(String(cur ?? selectedEmployee.oldSalary ?? selectedEmployee.salary ?? '')); setEditMonthSalary(true); }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30 transition">Update Salary for Month</button>
                       )}
                       {salaryType === 'old' && editMonthSalary && (
                         <div className="flex items-center gap-2">
@@ -1220,7 +1240,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                           <button type="button" onClick={async () => {
                             const amt = parseFloat(monthSalaryInput);
                             if (isNaN(amt) || amt < 0) { showNotification('Enter a valid amount', 'error'); return; }
-                            const currentMonth = selectedDate.substring(0, 7);
+                            const currentMonth = selectedMonth;
                             const updated = { ...selectedEmployee.monthSalary, [currentMonth]: amt };
                             try {
                               await updateEmployee(selectedEmployee.id!, { ...selectedEmployee, monthSalary: updated });
@@ -1276,7 +1296,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
               <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 overflow-hidden">
                 <div className="flex flex-col md:flex-row justify-between md:items-center gap-3 p-6 pb-4">
                   <div>
-                    <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-yellow-400" /> Salary Calculation ({selectedDate.substring(0, 7)})</h3>
+                    <h3 className="text-lg font-bold flex items-center gap-2"><FiDollarSign className="text-yellow-400" /> Salary Calculation ({selectedMonth})</h3>
                     <p className="text-xs text-gray-400 mt-1">Salary based on present days. Sundays & holidays auto-excluded.</p>
                   </div>
                   <div className="flex gap-2">
@@ -1307,12 +1327,12 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       {filteredEmployees.map(e => {
                         const info = getEmployeeSalaryInfo(e);
                         const annualQuota = getEmpClQuota(e);
-                        const usedTotal = getClUsedTotal(e.autoId, selectedDate.substring(0, 7), attendance);
+                        const usedTotal = getClUsedTotal(e.autoId, selectedMonth, attendance);
                         const remainingAnnual = Math.max(0, annualQuota - usedTotal);
                         const effAbsent = info.absentDays;
                         const effSalary = info.earnedSalary;
                         const clLeft = remainingAnnual;
-                        const paidExpenses = getPaidSalaryExpenses(e, selectedDate.substring(0, 7));
+                        const paidExpenses = getPaidSalaryExpenses(e, selectedMonth);
                         const paid = paidExpenses.length > 0;
                         return (
                           <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
@@ -1345,7 +1365,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                                   title={`Add salary expense for ${e.name}`}
                                   className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-semibold rounded-lg shadow transition"
                                 >
-                                  <FiDollarSign size={13} /> Pay ₹{Math.max(0, effSalary - ((e.monthDeduction?.[selectedDate.substring(0, 7)] ?? e.otherDeduction) || 0)).toLocaleString()}
+                                  <FiDollarSign size={13} /> Pay ₹{Math.max(0, effSalary - ((e.monthDeduction?.[selectedMonth] ?? e.otherDeduction) || 0)).toLocaleString()}
                                 </button>
                               )}
                             </td>
@@ -1424,23 +1444,30 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
           {/* CL & Deduction Management */}
           <div className="bg-[#1E1E1E] rounded-2xl border border-gray-800 p-6">
             <h3 className="text-lg font-bold mb-1 flex items-center gap-2"><FiEye className="text-cyan-400" /> CL &amp; Deduction Management</h3>
-            <p className="text-xs text-gray-400 mb-4">
-              Approve an absence to cover it with CL (no salary deduction, 1 CL used). Disapprove it to deduct salary for that day. Late marks use 0.5 CL each and count as present. Month shown: <span className="text-cyan-400 font-semibold">{selectedDate.substring(0, 7)}</span>
+            <p className="text-xs text-gray-400 mb-2">
+              Approve an absence to cover it with CL (no salary deduction, 1 CL used). Disapprove it to deduct salary for that day. Late marks use 0.5 CL each — now also requires approval (half-day). Select month and employee to review.
             </p>
-            <select
-              value={clViewEmpId}
-              onChange={e => setClViewEmpId(e.target.value)}
-              className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white mb-4"
-            >
-              <option value="">-- Select Employee --</option>
-              {employees.filter(e => e.status === 'ACTIVE').sort((a, b) => a.name.localeCompare(b.name)).map(e => (
-                <option key={e.id} value={e.autoId}>{e.name} — {e.role} ({e.autoId})</option>
-              ))}
-            </select>
+            <div className="flex flex-col md:flex-row gap-3 mb-4">
+              <select
+                value={clViewEmpId}
+                onChange={e => setClViewEmpId(e.target.value)}
+                className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white"
+              >
+                <option value="">-- Select Employee --</option>
+                {employees.filter(e => e.status === 'ACTIVE').sort((a, b) => a.name.localeCompare(b.name)).map(e => (
+                  <option key={e.id} value={e.autoId}>{e.name} — {e.role} ({e.autoId})</option>
+                ))}
+              </select>
+              <div className="space-y-1 min-w-[180px]">
+                <label className="text-xs text-cyan-400">Month</label>
+                <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full p-2.5 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mb-2">Showing: <span className="text-cyan-400 font-semibold">{selectedMonth} • {new Date(selectedMonth + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span></p>
 
             {clViewEmpId && (() => {
               const emp = employees.find(e => e.autoId === clViewEmpId);
-              const currentMonthKey = selectedDate.substring(0, 7);
+              const currentMonthKey = selectedMonth;
               const annualQuota = getEmpClQuota(emp);
               const summ = getMonthAttSummary(emp!.autoId, currentMonthKey, attendance, holidays);
               const usedTotal = getClUsedTotal(emp!.autoId, currentMonthKey, attendance);
@@ -1500,10 +1527,10 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                     </div>
                   )}
 
-                  {summ.records.filter(r => r.status === 'absent').length === 0 ? (
+                  {summ.records.filter(r => r.status === 'absent' || r.status === 'late').length === 0 ? (
                     <div className="text-center py-10">
                       <div className="text-5xl mb-3">📋</div>
-                      <p className="text-gray-500">No absences recorded for {emp?.name} in {currentMonthKey}. Absences marked in the attendance grid will appear here for approval.</p>
+                      <p className="text-gray-500">No absences or half-days recorded for {emp?.name} in {currentMonthKey}. Late (half-day) and absent marks will appear here for approval.</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -1512,13 +1539,16 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Date</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Day</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Type</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Status</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400">Action</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {summ.records.filter(r => r.status === 'absent').sort((a, b) => a.date.localeCompare(b.date)).map(rec => {
-                            const isApproved = isClCovered(rec, currentMonthKey);
+                          {summ.records.filter(r => r.status === 'absent' || r.status === 'late').sort((a, b) => a.date.localeCompare(b.date)).map(rec => {
+                            const isHalfDay = rec.status === 'late';
+                            const isApproved = isHalfDay ? isLateClCovered(rec, currentMonthKey) : isClCovered(rec, currentMonthKey);
+                            const isPending = isHalfDay ? isLatePending(rec, currentMonthKey) : isClPending(rec, currentMonthKey);
                             const isDisapproved = rec.clStatus === 'disapproved';
                             const wasAutoCovered = isApproved && !rec.clStatus;
                             return (
@@ -1526,12 +1556,15 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                                 <td className="px-4 py-3 font-mono text-cyan-400 text-sm">{rec.date}</td>
                                 <td className="px-4 py-3 text-sm text-gray-400">{new Date(rec.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' })}</td>
                                 <td className="px-4 py-3 text-sm">
+                                  {isHalfDay ? <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-semibold"><FiClock size={12} /> Half Day (0.5 CL)</span> : <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold"><FiX size={12} /> Full Day (1 CL)</span>}
+                                </td>
+                                <td className="px-4 py-3 text-sm">
                                   {isApproved ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold"><FiCheck size={12} /> {wasAutoCovered ? 'Covered — CL used (past month)' : 'Approved — CL used'}</span>
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold"><FiCheck size={12} /> {wasAutoCovered ? (isHalfDay ? 'Covered — 0.5 CL (past month, Half)' : 'Covered — CL used (past month)') : (isHalfDay ? 'Approved — 0.5 CL used' : 'Approved — CL used')}</span>
                                   ) : isDisapproved ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold"><FiX size={12} /> Disapproved — deducted</span>
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold"><FiX size={12} /> {isHalfDay ? 'Disapproved — 0.5 deducted' : 'Disapproved — deducted'}</span>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-semibold"><FiClock size={12} /> Pending</span>
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-semibold"><FiClock size={12} /> {isHalfDay ? 'Pending — 0.5 CL' : 'Pending'}</span>
                                   )}
                                 </td>
                                 <td className="px-4 py-3">
@@ -1540,7 +1573,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                                       <button
                                         onClick={() => setClApproval(rec, 'approved')}
                                         disabled={isApproved}
-                                        title="Approve — use 1 CL, no salary deduction"
+                                        title={isHalfDay ? "Approve — use 0.5 CL, no salary deduction (Half Day)" : "Approve — use 1 CL, no salary deduction"}
                                         className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${isApproved ? 'bg-emerald-500/20 text-emerald-400 cursor-default' : 'bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400'}`}
                                       >
                                         <FiCheck size={12} /> Approve
@@ -1548,7 +1581,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                                       <button
                                         onClick={() => setClApproval(rec, 'disapproved')}
                                         disabled={isDisapproved}
-                                        title="Disapprove — deduct salary for this day"
+                                        title={isHalfDay ? "Disapprove — deduct 0.5 salary (Half Day)" : "Disapprove — deduct salary for this day"}
                                         className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${isDisapproved ? 'bg-red-500/20 text-red-400 cursor-default' : 'bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400'}`}
                                       >
                                         <FiX size={12} /> Disapprove
@@ -1655,14 +1688,14 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                 <label className="text-xs text-gray-400">Description (auto)</label>
                 <input
                   type="text"
-                  value={`Salary payment for ${directPay.emp.name} — ${new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`}
+                  value={`Salary payment for ${directPay.emp.name} — ${new Date(selectedMonth + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`}
                   readOnly
                   className="mt-1 w-full p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-gray-300"
                 />
               </div>
               <div>
                 <label className="text-xs text-gray-400">Month (auto)</label>
-                <input type="text" value={selectedDate.substring(0, 7)} readOnly className="mt-1 w-full p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-gray-300" />
+                <input type="text" value={selectedMonth} readOnly className="mt-1 w-full p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-gray-300" />
               </div>
               <div className="flex gap-2 pt-2">
                 <button

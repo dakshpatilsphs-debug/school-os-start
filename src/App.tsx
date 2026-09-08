@@ -5033,9 +5033,15 @@ const App: React.FC = () => {
                         return <span className="text-xs text-red-400 whitespace-nowrap" title={latest.month ? `Latest deduction for ${latest.month}` : 'Monthly deduction'}>₹{latest.amount.toLocaleString()}{label}</span>;
                       })()}
                       {deductPopoverEmpId === e.id && (
-                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[240px] space-y-2">
-                          <label className="text-xs text-cyan-400">Deduction Amount (₹)</label>
-                          <input type="number" min={0} placeholder="Deduction amount" value={deductAmount} onChange={ev => setDeductAmount(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm" />
+                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[260px] space-y-3">
+                          <div className="space-y-1">
+                            <label className="text-xs text-cyan-400">Month</label>
+                            <input type="month" value={deductMonth} onChange={ev => setDeductMonth(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-cyan-400">Deduction Amount (₹)</label>
+                            <input type="number" min={0} placeholder="Deduction amount" value={deductAmount} onChange={ev => setDeductAmount(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
+                          </div>
                           <p className="text-[11px] text-gray-500">Applies to {new Date(deductMonth + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
                           <div className="flex gap-2 pt-1">
                             <button onClick={() => handleSaveMonthDeduction(e)} className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-semibold">Save</button>
