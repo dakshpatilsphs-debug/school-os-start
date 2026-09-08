@@ -1315,11 +1315,12 @@ const App: React.FC = () => {
   };
 
   const openDeductPopover = (emp: Employee) => {
-    const targetMonth = getLatestDeductMonth(emp) || getMonthKey(new Date());
+    const targetMonth = getMonthKey(new Date());
     setDeductMonth(targetMonth);
     const cur = emp.monthDeduction?.[targetMonth];
+    // If no deduction for current month, show otherDeduction as placeholder but don't prefill with old month's amount
     setDeductPopoverEmpId(emp.id || '');
-    setDeductAmount(cur != null ? String(cur) : String(emp.otherDeduction || ''));
+    setDeductAmount(cur != null ? String(cur) : '');
   };
 
   const handleSaveMonthDeduction = async (emp: Employee) => {
@@ -5020,17 +5021,15 @@ const App: React.FC = () => {
                 const ei = getEmployeeExpenseInfo(e);
                 return (<tr key={e.id} className={`border-t border-gray-800 hover:bg-gray-800/30 transition ${e.hidden ? 'opacity-50' : ''}`}>
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4 font-semibold">{e.name}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{e.role}</span></td><td className="px-6 py-4 hidden xl:table-cell text-gray-400">{e.department || '—'}</td>
-                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{Math.max(0, (e.salary || 0) - getLatestEmployeeDeduction(e).amount).toLocaleString()}{getLatestEmployeeDeduction(e).amount > 0 && <p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()}</p>}</td>
+                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{Math.max(0, (e.salary || 0) - ((e.monthDeduction?.[getMonthKey(new Date())] ?? e.otherDeduction) || 0)).toLocaleString()}{((e.monthDeduction?.[getMonthKey(new Date())] ?? e.otherDeduction) || 0) > 0 && <p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()}</p>}</td>
                   <td className="px-6 py-4">
                     <div className="relative flex items-center gap-2">
                       <button onClick={() => { if (deductPopoverEmpId === e.id) { setDeductPopoverEmpId(''); return; } openDeductPopover(e); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition" title="Add/Edit monthly deduction"> <FiMinus size={13} /> Deduct</button>
                       {(() => {
-                        const latest = getLatestEmployeeDeduction(e);
-                        if (latest.amount <= 0) return null;
-                        const label = latest.month
-                          ? ` (${new Date(latest.month + '-01T00:00:00').toLocaleDateString('en-US', { month: 'short' })})`
-                          : '/mo';
-                        return <span className="text-xs text-red-400 whitespace-nowrap" title={latest.month ? `Latest deduction for ${latest.month}` : 'Monthly deduction'}>₹{latest.amount.toLocaleString()}{label}</span>;
+                        const cm = getMonthKey(new Date());
+                        const cur = e.monthDeduction?.[cm] ?? e.otherDeduction ?? 0;
+                        if (cur <= 0) return <span className="text-xs text-gray-500">—</span>;
+                        return <span className="text-xs text-red-400 whitespace-nowrap" title={`Deduction for ${cm} (one-month only)`}>₹{cur.toLocaleString()} ({new Date(cm + '-01T00:00:00').toLocaleDateString('en-US', { month: 'short' })})</span>;
                       })()}
                       {deductPopoverEmpId === e.id && (
                         <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[260px] space-y-3">
