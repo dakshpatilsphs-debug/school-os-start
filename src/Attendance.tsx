@@ -719,6 +719,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       earnedSalary: salaryData.salary.earnedSalary,
       deductions: salaryData.salary.deductions,
       netSalary: salaryData.salary.earnedSalary,
+      lateApproved: (salaryData.attendance as any).lateApproved ?? 0,
+      latePending: (salaryData.attendance as any).latePending ?? 0,
+      lateDisapproved: (salaryData.attendance as any).lateDisapproved ?? 0,
     } : getEmployeeSalaryInfo(emp);
     const bd = salaryData ? { grossSalary: salaryData.salary.monthlyGross, earnedSalary: salaryData.salary.earnedSalary, totalDeductions: salaryData.salary.deductions } : getSalaryBreakdown(emp, si);
     const pw = 210;
