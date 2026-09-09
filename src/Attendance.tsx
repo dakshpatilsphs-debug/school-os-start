@@ -843,7 +843,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ['Designation', salaryData ? salaryData.employee.designation : (emp.role || '-')],
       ['Working Days', String(si.workingDays)],
       ['Present Days', String((() => { const la = (si as any).lateApproved ?? 0; const lp = (si as any).latePending ?? 0; const eff = si.presentDays + (la + lp) * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })())],
-      ['Absent Days', String((() => { const ld = (si as any).lateDisapproved ?? 0; const eff = si.absentDays + ld * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })())],
+      ['Absent Days', String(si.absentDays)],
     ]);
     drawCard(ML + cardW + padLg, 'BANK & PAY DETAILS', [
       ['Department', salaryData ? salaryData.employee.department : (emp.department || '-')],
@@ -1348,7 +1348,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const annualQuota = getEmpClQuota(e);
                         const usedTotal = getClUsedTotal(e.autoId, selectedMonth, attendance);
                         const remainingAnnual = Math.max(0, annualQuota - usedTotal);
-                        const effAbsent = info.absentDays + ((info as any).lateDisapproved ?? 0) * 0.5;
+                        const effAbsent = info.absentDays;
                         const effSalary = info.earnedSalary;
                         const clLeft = remainingAnnual;
                         const lateApproved = (info as any).lateApproved ?? 0;
