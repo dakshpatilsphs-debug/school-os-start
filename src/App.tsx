@@ -41,6 +41,13 @@ type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'f
 
 import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered, getCurrentMonthKey as getClCurrentMonth, getEarnedSalaryForMonth } from './clUtils';
 
+const generateSecondaryStudentId = (name?: string, studentClass?: string, roll?: string) => {
+  const n = (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'STU';
+  const c = (studentClass || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  const r = (roll || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  return `S2-${n}-${c || 'NA'}-${r || 'NA'}`;
+};
+
 const App: React.FC = () => {
   const isAdminMode = (import.meta as any).env?.VITE_ADMIN_MODE === 'true';
   const allowedAdminTabs: Tab[] = ['reports', 'studentlist', 'feesbystudent', 'dashboard'];
@@ -699,7 +706,7 @@ const App: React.FC = () => {
         const remoteSms: any = remoteSchool ? null : await getSmsSettings().catch(() => null);
         const remote = remoteSchool || remoteSms;
         if (!cancelled && remote) {
-          setSchoolSettings(prev => {
+          setSchoolSettings((prev: any) => {
             const merged: any = { ...prev };
             let changed = false;
             // Full school settings merge (when getSchoolSettings returned)
@@ -867,15 +874,6 @@ const App: React.FC = () => {
 
   // Auto ID is GLOBAL and sequential: STU-001, STU-002...
   const formatStudentAutoId = (num: number) => `STU-${String(num).padStart(3, '0')}`;
-
-  // Secondary Auto ID — stable link derived from student name + class + roll.
-  // Used by Fees & Billing to locate a student even if the primary AUTO ID changes.
-  const generateSecondaryStudentId = (name?: string, studentClass?: string, roll?: string) => {
-    const n = (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'STU';
-    const c = (studentClass || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-    const r = (roll || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-    return `S2-${n}-${c || 'NA'}-${r || 'NA'}`;
-  };
 
   const findFeeStudent = (fee: Fee) =>
     students.find(s => s.autoId === fee.studentId) ||
@@ -2097,7 +2095,7 @@ const App: React.FC = () => {
         doc.text(e.name, colName, y + 4.5);
         doc.setTextColor(...sTextSec);
         doc.text(String(e.presentDays), colPD, y + 4.5);
-        if (e.absentDays > e.autoCover) doc.setTextColor(220, 38, 38); else doc.setTextColor(...sTextSec);
+        if (e.absentDays > e.clUsed) doc.setTextColor(220, 38, 38); else doc.setTextColor(...sTextSec);
         doc.text(String(e.absentDays), colAD, y + 4.5);
         doc.setTextColor(6, 182, 212);
         doc.text(String(e.clUsed), colCLU, y + 4.5);
@@ -2710,7 +2708,7 @@ const App: React.FC = () => {
     const pageCount = doc.getNumberOfPages();
     for (let p = 1; p <= pageCount; p++) {
       doc.setPage(p);
-      pdfFooter(doc, pw, ph, schoolSettings, p, pageCount);
+      pdfFooter(doc, schoolSettings.schoolName || 'School OS', pw, schoolSettings);
     }
 
     doc.save(`Monthly_Financial_Summary_${sy}.pdf`);
@@ -2855,12 +2853,12 @@ const App: React.FC = () => {
 
     const doc = new jsPDF();
     const pw = 210, ML = 6, MR = pw - 6, CW = MR - ML;
-    const sBorder = [226, 232, 240] as const;
-    const sText = [30, 41, 59] as const;
-    const sTextSec = [100, 116, 139] as const;
-    const sTextMuted = [148, 163, 184] as const;
-    const sPrimary = [14, 165, 233] as const;
-    const sPrimaryDark = [2, 132, 199] as const;
+    const sBorder: [number, number, number] = [226, 232, 240];
+    const sText: [number, number, number] = [30, 41, 59];
+    const sTextSec: [number, number, number] = [100, 116, 139];
+    const sTextMuted: [number, number, number] = [148, 163, 184];
+    const sPrimary: [number, number, number] = [14, 165, 233];
+    const sPrimaryDark: [number, number, number] = [2, 132, 199];
     const money = (val: number) => 'Rs ' + Math.round(val || 0).toLocaleString('en-IN');
     const cX = (pct: number) => ML + 2 + CW * pct / 100;
     const getMonthFromDate = (d: string) => { if (!d) return ''; const dt = new Date(d); return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); };
@@ -2970,8 +2968,8 @@ const App: React.FC = () => {
       doc.addPage(); y = 12; drawPageHeader('Financial Report');
 
       // ── Red theme for expense section ──
-      const expRed = [220, 38, 38] as const;
-      const expRedLight = [254, 242, 242] as const;
+      const expRed: [number, number, number] = [220, 38, 38];
+      const expRedLight: [number, number, number] = [254, 242, 242];
 
       needPage(16);
 

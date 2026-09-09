@@ -1318,7 +1318,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                 </div>
                 {showSalaryCalc && (
                 <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-800">
-                  <table className="w-full min-w-[1050px]">
+                  <table className="w-full min-w-[1150px]">
                     <thead className="bg-gray-800/50">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap sticky left-0 bg-gray-800/90 backdrop-blur z-20 w-[180px] min-w-[180px] max-w-[180px]">Employee</th>
@@ -1328,6 +1328,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 whitespace-nowrap">Per Day</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">CL Left</th>
                         <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 whitespace-nowrap">Earned Salary</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-emerald-400 whitespace-nowrap">Paid</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Direct Pay</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">PDF</th>
                       </tr>
@@ -1354,7 +1355,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                             <td className="px-4 py-3 text-center text-gray-400">{info.workingDays}</td>
                             <td className="px-4 py-3 text-right text-gray-400">₹{info.perDaySalary.toFixed(0)}</td>
                             <td className="px-4 py-3"><span className="text-cyan-400 font-semibold">{clLeft}</span></td>
-                            <td className="px-4 py-3"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
+                            <td className="px-4 py-3 text-right"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
+                            <td className="px-4 py-3 text-right"><span className={`font-bold ${paid ? 'text-emerald-400' : 'text-gray-500'}`}>₹{paidExpenses.reduce((s, ex) => s + (ex.amount || 0), 0).toLocaleString()}</span>{paid ? <span className="text-[10px] text-emerald-400 ml-1">✓</span> : <span className="text-[10px] text-gray-500 ml-1">—</span>}</td>
                             <td className="px-4 py-3">
                               {paid ? (
                                 <div className="flex items-center gap-1.5">
