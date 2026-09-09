@@ -1047,6 +1047,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
         absentDays: info.absentDays,
         casualLeavesUsed: usedTotal,
         casualLeavesRemaining: remainingAnnual,
+        lateApproved: (info as any).lateApproved ?? 0,
+        latePending: (info as any).latePending ?? 0,
+        lateDisapproved: (info as any).lateDisapproved ?? 0,
       },
       salary: {
         monthlyGross: info.monthlySalary,

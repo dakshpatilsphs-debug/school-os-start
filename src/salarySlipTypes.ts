@@ -23,6 +23,9 @@ export interface AttendanceInfo {
   absentDays: number;
   casualLeavesUsed: number;
   casualLeavesRemaining: number;
+  lateApproved?: number;
+  latePending?: number;
+  lateDisapproved?: number;
 }
 
 export interface SalaryInfo {
