@@ -541,57 +541,7 @@ export const AppModals: React.FC<ModalProps> = (p) => {
     </div>
   );
 
-  const parseOfferPoints = (raw: string): { t: string; d: string[] }[] =>
-    raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-      if (l === '_blank_') return { t: '', d: [] };
-      const idx = l.indexOf('|');
-      if (idx > -1) {
-        const descRaw = l.substring(idx + 1).trim();
-        return { t: l.substring(0, idx).trim(), d: descRaw ? descRaw.split('::').map(s => s.trim()) : [''] };
-      }
-      return { t: l, d: [] };
-    });
-
-  const serializePoints = (pts: { t: string; d: string[] }[]): string =>
-    pts.map(x => {
-      if (!x.t && x.d.length === 0) return '_blank_';
-      const desc = x.d.join(' :: ');
-      return x.t + (desc || x.d.length > 0 ? ' | ' + desc : '');
-    }).join('\n');
-
   const renderOfferLetterSettings = () => {
-    const pts = parseOfferPoints(p.schoolSettings.offerPoints || '');
-    const addPoint = () => {
-      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
-      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints([...cur, { t: '', d: [] }]) });
-    };
-    const updateTitle = (i: number, val: string) => {
-      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
-      const next = cur.map((x, idx) => idx === i ? { ...x, t: val } : x);
-      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
-    };
-    const addDesc = (i: number) => {
-      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
-      const next = cur.map((x, idx) => idx === i ? { ...x, d: [...x.d, ''] } : x);
-      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
-    };
-    const updateDesc = (i: number, di: number, val: string) => {
-      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
-      const next = cur.map((x, idx) => idx === i ? { ...x, d: x.d.map((dd, ddi) => ddi === di ? val : dd) } : x);
-      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
-    };
-    const removeDesc = (i: number, di: number) => {
-      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
-      const next = cur.map((x, idx) => idx === i ? { ...x, d: x.d.filter((_, ddi) => ddi !== di) } : x);
-      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(next) });
-    };
-    const removePoint = (i: number) => {
-      const cur = parseOfferPoints(p.schoolSettings.offerPoints || '');
-      p.setSchoolSettings({ ...p.schoolSettings, offerPoints: serializePoints(cur.filter((_, idx) => idx !== i)) });
-    };
-
-    const heading = p.schoolSettings.offerPointsHeading || 'Terms & Conditions';
-
     return (
       <div className="space-y-5">
         <div className="flex items-center justify-between">
@@ -604,29 +554,10 @@ export const AppModals: React.FC<ModalProps> = (p) => {
 
           <div className="space-y-1"><label className="text-xs text-cyan-400">Points Heading</label><input value={p.schoolSettings.offerPointsHeading || 'Terms & Conditions'} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerPointsHeading: e.target.value })} className={inputCls} placeholder="Terms & Conditions" /></div>
 
-          {/* Dynamic Points Builder */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-cyan-400 font-semibold">Points / Conditions</label>
-              <button onClick={addPoint} className="flex items-center gap-1 text-xs bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-3 py-1.5 rounded-lg font-semibold"><FiPlus size={14} /> Add Point</button>
-            </div>
-            {pts.length === 0 && <p className="text-xs text-gray-500 italic">No points added. Click "Add Point" to create one.</p>}
-            {pts.map((pt, i) => (
-              <div key={i} className="flex gap-2 items-start bg-gray-800/50 rounded-lg p-3 border border-gray-700">
-                <div className="flex-1 space-y-2">
-                  <input value={pt.t} onChange={e => updateTitle(i, e.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm" placeholder="Point title" />
-                  {pt.d.map((desc, di) => (
-                    <div key={di} className="flex gap-1 items-center">
-                      <span className="text-gray-500 text-xs shrink-0">•</span>
-                      <input value={desc} onChange={e => updateDesc(i, di, e.target.value)} className="flex-1 p-1.5 bg-gray-900 rounded-lg border border-gray-700 text-white text-xs" placeholder={`Description ${di + 1}`} />
-                      <button onClick={() => removeDesc(i, di)} aria-label="Remove description" title="Remove description" className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded"><FiX size={12} /></button>
-                    </div>
-                  ))}
-                  <button onClick={() => addDesc(i)} className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"><FiPlus size={12} /> Add description</button>
-                </div>
-                <button onClick={() => removePoint(i)} aria-label="Remove point" title="Remove point" className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded mt-1"><FiX size={16} /></button>
-              </div>
-            ))}
+          <div className="space-y-1">
+            <label className="text-xs text-cyan-400">Points / Conditions <span className="text-gray-500">(each line = one point: Title | Description — use :: for multiple descriptions per point)</span></label>
+            <textarea value={p.schoolSettings.offerPoints || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerPoints: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm h-32 font-mono" placeholder={"Appointment | Appointment is subject to verification of documents.\nPolicies | You are expected to follow all school policies :: and code of conduct.\nSalary & Duties | Salary and duties will be as discussed."} />
+            <p className="text-[11px] text-gray-500">Format: <code className="bg-gray-800 px-1 rounded">Title | Description</code> per line. For multiple descriptions under same title, use <code className="bg-gray-800 px-1 rounded">::</code> e.g. <code className="bg-gray-800 px-1 rounded">Policies | Desc1 :: Desc2 :: Desc3</code> — they will appear as bullets under that title (not as separate points).</p>
           </div>
 
           <div className="space-y-1"><label className="text-xs text-cyan-400">Additional Terms</label><textarea value={p.schoolSettings.offerTerms || ''} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, offerTerms: e.target.value })} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white h-20" placeholder="Final terms, validity, joining formalities..." /></div>
