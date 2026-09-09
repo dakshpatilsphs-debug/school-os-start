@@ -547,16 +547,22 @@ export const AppModals: React.FC<ModalProps> = (p) => {
       const idx = l.indexOf('|');
       if (idx > -1) {
         const descRaw = l.substring(idx + 1).trim();
-        return { t: l.substring(0, idx).trim(), d: descRaw ? descRaw.split('::').map(s => s.trim()).filter(Boolean) : [] };
+        if (descRaw === '') return { t: l.substring(0, idx).trim(), d: [''] };
+        return { t: l.substring(0, idx).trim(), d: descRaw.split('::').map(s => s.trim()) };
       }
       return { t: l, d: [] };
     });
 
   const serializePoints = (pts: { t: string; d: string[] }[]): string =>
     pts.map(x => {
-      if (!x.t && x.d.length === 0) return '_blank_';
-      const desc = x.d.join(' :: ');
-      return x.t + (desc ? ' | ' + desc : '');
+      const hasTitle = x.t.trim() !== '';
+      const hasDescs = x.d.length > 0;
+      if (!hasTitle && !hasDescs) return '_blank_';
+      if (hasDescs) {
+        const desc = x.d.join(' :: ');
+        return (x.t || '') + ' | ' + desc;
+      }
+      return x.t;
     }).join('\n');
 
   const renderOfferLetterSettings = () => {
