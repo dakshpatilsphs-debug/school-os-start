@@ -64,7 +64,9 @@ export interface Employee {
   clQuota?: number;
   clAllowance?: number;
   otherDeduction?: number;
-  monthDeduction?: Record<string, number>;
+  otherDeductionDesc?: string;
+  monthDeduction?: Record<string, number | { amount: number; description?: string }>;
+  monthDeductionDesc?: Record<string, string>;
   hidden?: boolean;
 
 }

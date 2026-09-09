@@ -150,6 +150,20 @@ export const getMonthAttSummary = (empId: string, monthKey: string, attendance: 
   };
 };
 
+export const getMonthDeductionInfo = (emp: Employee, monthKey: string): { amount: number; description: string } => {
+  const raw = (emp as any).monthDeduction?.[monthKey];
+  if (raw != null) {
+    if (typeof raw === 'object' && raw !== null && 'amount' in raw) {
+      return { amount: Number((raw as any).amount) || 0, description: String((raw as any).description || (emp as any).monthDeductionDesc?.[monthKey] || '') };
+    }
+    return { amount: Number(raw) || 0, description: String((emp as any).monthDeductionDesc?.[monthKey] || '') };
+  }
+  // Fallback to otherDeduction for current month display
+  const otherAmt = Number((emp as any).otherDeduction) || 0;
+  const otherDesc = String((emp as any).otherDeductionDesc || '');
+  return { amount: otherAmt, description: otherDesc };
+};
+
 export const getEarnedSalaryForMonth = (emp: Employee, monthKey: string, attendance: Attendance[], holidays?: Holiday[], salaryOverride?: number): { earned: number; perDay: number; paidDays: number; deductions: number; workingDays: number } => {
   const summ = getMonthAttSummary(emp.autoId, monthKey, attendance, holidays);
   const monthlySalary = salaryOverride ?? emp.salary ?? 0;
@@ -159,10 +173,9 @@ export const getEarnedSalaryForMonth = (emp: Employee, monthKey: string, attenda
   }
   const lateApproved = (summ as any).lateApproved ?? 0;
   const latePending = (summ as any).latePending ?? 0;
-  // Late counts as present (1) for salary per original spec (0.5 CL each, 2L=1CL), disapproved half =0.5 deducted
+  const lateDisapproved = (summ as any).lateDisapproved ?? 0;
   const paidDays = summ.present + lateApproved + latePending + summ.clApproved;
   const earned = Math.round(paidDays * perDay);
-  const lateDisapproved = (summ as any).lateDisapproved ?? 0;
   const halfDed = lateDisapproved * 0.5 * perDay;
   const fullDed = summ.absent * perDay;
   const deductions = Math.round(fullDed + halfDed);

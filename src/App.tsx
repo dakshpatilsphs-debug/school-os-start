@@ -199,6 +199,7 @@ const App: React.FC = () => {
   const [deductPopoverEmpId, setDeductPopoverEmpId] = useState('');
   const [deductMonth, setDeductMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const [deductAmount, setDeductAmount] = useState('');
+  const [deductDesc, setDeductDesc] = useState('');
   const [uiTheme, setUiTheme] = useState<'blackblue' | 'wrb'>(() => (localStorage.getItem('uiTheme') === 'wrb' ? 'wrb' : 'blackblue'));
   const [lang, setLang] = useState<'en' | 'hi' | 'mr'>(() => {
     const v = localStorage.getItem('appLang');
@@ -1316,22 +1317,53 @@ const App: React.FC = () => {
   const openDeductPopover = (emp: Employee) => {
     const targetMonth = getMonthKey(new Date());
     setDeductMonth(targetMonth);
-    const cur = emp.monthDeduction?.[targetMonth];
-    // If no deduction for current month, show otherDeduction as placeholder but don't prefill with old month's amount
+    const raw = (emp as any).monthDeduction?.[targetMonth];
+    let curAmt: any = raw;
+    let curDesc = '';
+    if (raw != null && typeof raw === 'object' && 'amount' in raw) {
+      curAmt = (raw as any).amount;
+      curDesc = String((raw as any).description || '');
+    } else if (raw != null) {
+      curDesc = String((emp as any).monthDeductionDesc?.[targetMonth] || '');
+    } else {
+      curDesc = String((emp as any).otherDeductionDesc || '');
+    }
     setDeductPopoverEmpId(emp.id || '');
-    setDeductAmount(cur != null ? String(cur) : '');
+    setDeductAmount(curAmt != null ? String(curAmt) : '');
+    setDeductDesc(curDesc || '');
   };
 
   const handleSaveMonthDeduction = async (emp: Employee) => {
     if (!deductMonth) { showNotification('Select a month', 'error'); return; }
     const amt = Math.max(0, parseFloat(deductAmount) || 0);
-    const current = emp.monthDeduction || {};
-    const updated: Record<string, number> = { ...current, [deductMonth]: amt };
-    setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, monthDeduction: updated } : x));
+    const desc = deductDesc.trim();
+    const current = (emp as any).monthDeduction || {};
+    const currentDescMap = (emp as any).monthDeductionDesc || {};
+    const updated: Record<string, any> = { ...current };
+    const updatedDesc: Record<string, string> = { ...currentDescMap };
+    if (amt > 0 || desc) {
+      updated[deductMonth] = desc ? { amount: amt, description: desc } : amt;
+      if (desc) updatedDesc[deductMonth] = desc;
+      else delete updatedDesc[deductMonth];
+      if (amt === 0 && !desc) {
+        delete updated[deductMonth];
+        delete updatedDesc[deductMonth];
+      }
+    } else {
+      delete updated[deductMonth];
+      delete updatedDesc[deductMonth];
+    }
+    const newEmp: any = { ...emp, monthDeduction: updated, monthDeductionDesc: updatedDesc };
+    // Keep otherDeduction in sync for fallback display (optional)
+    if (!amt && !desc && Object.keys(updated).length === 0) {
+      // keep otherDeduction as is
+    }
+    setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, monthDeduction: updated, monthDeductionDesc: updatedDesc } as any : x));
     setDeductPopoverEmpId('');
+    setDeductDesc('');
     try {
-      if (emp.id) await updateEmployee(emp.id, { monthDeduction: updated });
-      showNotification(`${emp.name}: deduction ₹${amt.toLocaleString()} for ${deductMonth}`, 'success');
+      if (emp.id) await updateEmployee(emp.id, { monthDeduction: updated, monthDeductionDesc: updatedDesc });
+      showNotification(`${emp.name}: deduction ₹${amt.toLocaleString()} for ${deductMonth}${desc ? ` — ${desc}` : ''}`, 'success');
     } catch (error) { showFirebaseError(error, 'Failed to update deduction'); }
   };
 
@@ -5031,7 +5063,7 @@ const App: React.FC = () => {
                         return <span className="text-xs text-red-400 whitespace-nowrap" title={`Deduction for ${cm} (one-month only)`}>₹{cur.toLocaleString()} ({new Date(cm + '-01T00:00:00').toLocaleDateString('en-US', { month: 'short' })})</span>;
                       })()}
                       {deductPopoverEmpId === e.id && (
-                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[260px] space-y-3">
+                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1E1E1E] border border-gray-800 rounded-xl p-3 shadow-lg min-w-[280px] space-y-3">
                           <div className="space-y-1">
                             <label className="text-xs text-cyan-400">Month</label>
                             <input type="month" value={deductMonth} onChange={ev => setDeductMonth(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
@@ -5039,6 +5071,10 @@ const App: React.FC = () => {
                           <div className="space-y-1">
                             <label className="text-xs text-cyan-400">Deduction Amount (₹)</label>
                             <input type="number" min={0} placeholder="Deduction amount" value={deductAmount} onChange={ev => setDeductAmount(ev.target.value)} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-cyan-400">Description <span className="text-gray-500">(small, optional)</span></label>
+                            <input type="text" placeholder="e.g., Advance, Loan, Fine" value={deductDesc} onChange={ev => setDeductDesc(ev.target.value)} maxLength={60} className="w-full p-2 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-cyan-500 focus:outline-none" />
                           </div>
                           <p className="text-[11px] text-gray-500">Applies to {new Date(deductMonth + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
                           <div className="flex gap-2 pt-1">

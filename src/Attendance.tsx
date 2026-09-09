@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Employee, Attendance as Att, Holiday, Expense } from './types';
 import type { SalarySlipData } from './salarySlipTypes';
-import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, getMonthAttSummary, isClCovered, isClPending, isLateClCovered, isLatePending } from './clUtils';
+import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, getMonthAttSummary, isClCovered, isClPending, isLateClCovered, isLatePending, getMonthDeductionInfo } from './clUtils';
 import { exportProperExcel } from './utils/excelHelper';
 
 interface AttendanceProps {
@@ -839,8 +839,8 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ['Employee ID', salaryData ? salaryData.employee.employeeId : emp.autoId],
       ['Designation', salaryData ? salaryData.employee.designation : (emp.role || '-')],
       ['Working Days', String(si.workingDays)],
-      ['Present Days', String(si.presentDays)],
-      ['Absent Days', String(si.absentDays)],
+      ['Present Days', String((() => { const la = (si as any).lateApproved ?? 0; const lp = (si as any).latePending ?? 0; const eff = si.presentDays + (la + lp) * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })())],
+      ['Absent Days', String((() => { const ld = (si as any).lateDisapproved ?? 0; const eff = si.absentDays + ld * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })())],
     ]);
     drawCard(ML + cardW + padLg, 'BANK & PAY DETAILS', [
       ['Department', salaryData ? salaryData.employee.department : (emp.department || '-')],
@@ -859,12 +859,14 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       ['Medical Allowance', 'Rs 0'],
       ['Conveyance Allowance', 'Rs 0'],
     ];
-    const otherDed = salaryData ? (salaryData.salary.deductions || 0) : ((emp.monthDeduction?.[selectedMonth] ?? emp.otherDeduction) || 0);
+    const deductInfoPdf = getMonthDeductionInfo(emp, selectedMonth);
+    const otherDed = salaryData ? (salaryData.salary.deductions || 0) : deductInfoPdf.amount;
+    const otherDedDesc = deductInfoPdf.description;
     const deductItems: [string, string][] = [
       ['EPF(%)', 'Rs 0'],
       ['PF(%)', 'Rs 0'],
       ['TDS', 'Rs 0'],
-      ['Others(-)', money(otherDed)],
+      ['Others(-)' + (otherDedDesc ? ` — ${otherDedDesc}` : ''), money(otherDed)],
       ['PTAX', 'Rs 0'],
     ];
     const itemCount = Math.max(earnItems.length, deductItems.length);
@@ -1318,7 +1320,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                 </div>
                 {showSalaryCalc && (
                 <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-800">
-                  <table className="w-full min-w-[1150px]">
+                  <table className="w-full min-w-[1250px]">
                     <thead className="bg-gray-800/50">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 whitespace-nowrap sticky left-0 bg-gray-800/90 backdrop-blur z-20 w-[180px] min-w-[180px] max-w-[180px]">Employee</th>
@@ -1327,6 +1329,7 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Work Days</th>
                         <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 whitespace-nowrap">Per Day</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">CL Left</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-orange-400 whitespace-nowrap">Deduction</th>
                         <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 whitespace-nowrap">Earned Salary</th>
                         <th className="px-4 py-3 text-right text-xs font-semibold text-emerald-400 whitespace-nowrap">Paid</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 whitespace-nowrap">Direct Pay</th>
@@ -1345,16 +1348,18 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                         const lateApproved = (info as any).lateApproved ?? 0;
                         const latePending = (info as any).latePending ?? 0;
                         const lateDisapproved = (info as any).lateDisapproved ?? 0;
+                        const deductInfo = getMonthDeductionInfo(e, selectedMonth);
                         const paidExpenses = getPaidSalaryExpenses(e, selectedMonth);
                         const paid = paidExpenses.length > 0;
                         return (
                           <tr key={e.id} className={`border-t border-gray-800 transition ${paid ? 'bg-red-500/20 hover:bg-red-500/30' : 'hover:bg-gray-800/30'}`}>
                             <td className="px-4 py-3 sticky left-0 bg-[#1E1E1E] z-10 w-[180px] min-w-[180px] max-w-[180px]"><p className="font-semibold text-sm truncate">{e.name}</p><p className="text-xs text-gray-500 truncate">{e.role}</p></td>
-                            <td className="px-4 py-3 text-center sticky left-[180px] bg-[#1E1E1E] z-10 border-l border-gray-700 w-[110px] min-w-[110px]"><div className="flex flex-col items-center"><span className="text-emerald-400 font-bold">{(() => { const eff = info.presentDays + (lateApproved + latePending) * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })()}</span><div className="flex gap-1 text-[10px] leading-none mt-0.5 flex-wrap justify-center">{lateApproved > 0 && <span className="text-yellow-400">+{lateApproved}L ✓(0.5)</span>}{latePending > 0 && <span className="text-yellow-300">+{latePending}L …(0.5)</span>}{lateDisapproved > 0 && <span className="text-orange-400">+{lateDisapproved}L ✗</span>}{info.clCovered > 0 && <span className="text-cyan-400">+{info.clCovered}CL</span>}</div></div></td>
+                            <td className="px-4 py-3 text-center sticky left-[180px] bg-[#1E1E1E] z-10 border-l border-gray-700 w-[110px] min-w-[110px]"><div className="flex flex-col items-center"><span className="text-emerald-400 font-bold">{(() => { const eff = info.presentDays + (lateApproved + latePending) * 0.5; return eff % 1 === 0 ? eff : eff.toFixed(1); })()}</span><div className="flex gap-1 text-[10px] leading-none mt-0.5 flex-wrap justify-center">{lateApproved > 0 && <span className="text-yellow-400">+{lateApproved}L ✓(0.5)</span>}{latePending > 0 && <span className="text-yellow-300">+{latePending}L …(0.5)</span>}{lateDisapproved > 0 && <span className="text-orange-400">+{lateDisapproved}L✗</span>}{info.clCovered > 0 && <span className="text-cyan-400">+{info.clCovered}CL</span>}</div></div></td>
                             <td className="px-4 py-3 text-center"><span className="text-red-400 font-semibold">{effAbsent % 1 === 0 ? effAbsent : effAbsent.toFixed(1)}</span></td>
                             <td className="px-4 py-3 text-center text-gray-400">{info.workingDays}</td>
                             <td className="px-4 py-3 text-right text-gray-400">₹{info.perDaySalary.toFixed(0)}</td>
                             <td className="px-4 py-3"><span className="text-cyan-400 font-semibold">{clLeft}</span></td>
+                            <td className="px-4 py-3 text-right"><div className="flex flex-col items-end"><span className={`font-semibold ${deductInfo.amount > 0 ? 'text-orange-400' : 'text-gray-500'}`}>₹{deductInfo.amount.toLocaleString()}</span>{deductInfo.description && <span className="text-[10px] text-gray-500 truncate max-w-[110px]">{deductInfo.description}</span>}</div></td>
                             <td className="px-4 py-3 text-right"><span className="font-bold text-yellow-400">₹{effSalary.toLocaleString()}</span></td>
                             <td className="px-4 py-3 text-right"><span className={`font-bold ${paid ? 'text-emerald-400' : 'text-gray-500'}`}>₹{paidExpenses.reduce((s, ex) => s + (ex.amount || 0), 0).toLocaleString()}</span>{paid ? <span className="text-[10px] text-emerald-400 ml-1">✓</span> : <span className="text-[10px] text-gray-500 ml-1">—</span>}</td>
                             <td className="px-4 py-3">
