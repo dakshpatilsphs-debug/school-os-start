@@ -121,11 +121,13 @@ export const getMonthAttSummary = (empId: string, monthKey: string, attendance: 
   const [year, month] = monthKey.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
   let workingDays = 0;
+  let holidaysCount = 0;
   for (let day = 1; day <= daysInMonth; day++) {
     const ds = `${monthKey}-${String(day).padStart(2, '0')}`;
     const d = new Date(ds + 'T12:00:00');
-    if (d.getDay() === 0) continue;
-    if (holidays?.some(h => h && h.date === ds && h.type === 'manual')) continue;
+    if (d.getDay() === 0) continue; // Skip Sundays only (not paid)
+    const isManualHoliday = holidays?.some(h => h && h.date === ds && h.type === 'manual');
+    if (isManualHoliday) holidaysCount++; // Manual holidays count as paid working days
     workingDays++;
   }
 
@@ -145,6 +147,7 @@ export const getMonthAttSummary = (empId: string, monthKey: string, attendance: 
     totalPending,
     halfDayDeduction,
     workingDays,
+    holidaysCount, // Manual holidays in this month (paid days off)
     daysInMonth,
     clUsedThisMonth,
   };
@@ -174,7 +177,8 @@ export const getEarnedSalaryForMonth = (emp: Employee, monthKey: string, attenda
   const lateApproved = (summ as any).lateApproved ?? 0;
   const latePending = (summ as any).latePending ?? 0;
   const lateDisapproved = (summ as any).lateDisapproved ?? 0;
-  const paidDays = summ.present + lateApproved + latePending + summ.clApproved;
+  const holidaysCount = (summ as any).holidaysCount ?? 0;
+  const paidDays = summ.present + lateApproved + latePending + summ.clApproved + holidaysCount + (lateDisapproved * 0.5);
   const earned = Math.round(paidDays * perDay);
   const halfDed = lateDisapproved * 0.5 * perDay;
   const fullDed = summ.absent * perDay;

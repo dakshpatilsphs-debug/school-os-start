@@ -12,6 +12,7 @@ import {
   addStudent, getStudents, updateStudent, deleteStudent,
   addFee, getFees, updateFee, deleteFee,
   addExpense, getExpenses, updateExpense, deleteExpense,
+  addFund, getFunds, updateFund, deleteFund,
   addEmployee, getEmployees, updateEmployee, deleteEmployee,
   addEquipment, getEquipments, updateEquipment, deleteEquipment,
   saveAttendance, getAttendance, deleteAttendance,
@@ -25,19 +26,20 @@ import {
   saveSubjectConfig, getSubjectConfigs, deleteSubjectConfig,
 
 } from './firebase';
-import { Student, Fee, Expense, Employee, Equipment, Attendance as Att, Holiday, SchoolLogo } from './types';
+import { Student, Fee, Expense, Fund, Employee, Equipment, Attendance as Att, Holiday, SchoolLogo } from './types';
 import { getColors as getPDFColors, getPDFColorsFromSettings, drawHeader as pdfHeader, drawFooter as pdfFooter, drawCoverPage as pdfCover, fmtDate as pdfDate, money as pdfMoney, getStatusColor as pdfStatusColor } from './PDFHelper';
 import { AppModals } from './Modals';
 import { AttendanceSection } from './Attendance';
-import { ScheduleSection } from './Schedule';
+import { FundSection } from './FundSection';
 import type { SalarySlipData } from './salarySlipTypes';
 import AIAssistant from './components/AIAssistant';
 import { SmsSection } from './SmsSection';
+import { PinAuth } from './PinAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { translations, t as tr } from './i18n';
 import { exportProperExcel, studentColumns, feeColumns, expenseColumns, employeeColumns, equipmentColumns, feesByStudentColumns, exportSampleExcel } from './utils/excelHelper';
 
-type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'schedule' | 'correction' | 'studentedit' | 'ai' | 'sms';
+type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'funds' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'correction' | 'studentedit' | 'ai' | 'sms';
 
 import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered, getCurrentMonthKey as getClCurrentMonth, getEarnedSalaryForMonth } from './clUtils';
 
@@ -64,6 +66,7 @@ const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [funds, setFunds] = useState<Fund[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [attendance, setAttendance] = useState<Att[]>([]);
@@ -98,6 +101,7 @@ const App: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [billFile, setBillFile] = useState<File | null>(null);
 
   const [schoolSettings, setSchoolSettings] = useState(() => {
@@ -132,9 +136,10 @@ const App: React.FC = () => {
       offerTerms: 'This offer is valid subject to acceptance and completion of joining formalities.',
       offerSignatory: 'Principal / Administrator',
       offerAck: 'I acknowledge and accept the terms and conditions mentioned above.',
-      smsToken: '681f0d5d-024e-452d-bbbc-6595b974c478',
-      smsEndpoint: '/smsgw',
-      smsIp: '10.205.244.156:8082',
+      smsToken: '',
+      smsEndpoint: 'https://api.textbees.in',
+      smsIp: '',
+      appPin: '1809',
     };
     if (saved) {
       try {
@@ -208,6 +213,7 @@ const App: React.FC = () => {
   const [summaryYear, setSummaryYear] = useState<number>(new Date().getFullYear());
   const [reportFees, setReportFees] = useState<Fee[]>([]);
   const [reportExpenses, setReportExpenses] = useState<Expense[]>([]);
+  const [reportFunds, setReportFunds] = useState<any[]>([]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', uiTheme);
@@ -234,6 +240,20 @@ const App: React.FC = () => {
 
   const showNotification = useCallback((message: string, type: 'success' | 'error') => { setNotification({ message, type }); setTimeout(() => setNotification(null), 3000); }, []);
 
+  const handleChangeAppPin = useCallback(async (newPin: string) => {
+    try {
+      const updated = { ...schoolSettings, appPin: newPin, updatedAt: Date.now() };
+      setSchoolSettings(updated);
+      try { localStorage.setItem('schoolSettings', JSON.stringify(updated)); } catch {}
+      try {
+        await setDoc(doc(db, 'settings', 'school'), { ...updated, updatedAt: Timestamp.now() }, { merge: true });
+      } catch {}
+      showNotification('PIN changed successfully', 'success');
+    } catch (error: any) {
+      showNotification('Failed to change PIN: ' + (error?.message || 'Unknown error'), 'error');
+    }
+  }, [schoolSettings, showNotification]);
+
   const getFirebaseErrorMessage = (error: any, fallback = 'Firebase operation failed') => {
     const code = error?.code || '';
     const message = error?.message || '';
@@ -258,7 +278,7 @@ const App: React.FC = () => {
     const msg = getFirebaseErrorMessage(error, fallback);
     showNotification(msg, 'error');
   }, [showNotification]);
-  const loadData = useCallback(async () => { try { const [s, f, e, emp, eq, att, hol] = await Promise.all([getStudents(), getFees(), getExpenses(), getEmployees(), getEquipments(), getAttendance(), getHolidays()]); setStudents((s as Student[]).sort((a, b) => { const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER; const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER; if (ao !== bo) return ao - bo; return (a.name || '').localeCompare(b.name || ''); })); setFees(f as Fee[]); setExpenses(e as Expense[]); setEmployees(emp as Employee[]); setEquipments(eq as Equipment[]); setAttendance(att as Att[]); setHolidays(hol as Holiday[]); } catch (error) { showFirebaseError(error, 'Failed to load data'); } }, [showFirebaseError]);
+  const loadData = useCallback(async () => { try { const [s, f, e, fd, emp, eq, att, hol] = await Promise.all([getStudents(), getFees(), getExpenses(), getFunds(), getEmployees(), getEquipments(), getAttendance(), getHolidays()]); setStudents((s as Student[]).sort((a, b) => { const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER; const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER; if (ao !== bo) return ao - bo; return (a.name || '').localeCompare(b.name || ''); })); setFees(f as Fee[]); setExpenses(e as Expense[]); setFunds(fd as Fund[]); setReportFunds(fd as any[]); setEmployees(emp as Employee[]); setEquipments(eq as Equipment[]); setAttendance(att as Att[]); setHolidays(hol as Holiday[]); } catch (error) { showFirebaseError(error, 'Failed to load data'); } }, [showFirebaseError]);
   const handleRefresh = async () => { setRefreshing(true); await loadData(); setTimeout(() => { setRefreshing(false); showNotification('Data refreshed successfully', 'success'); }, 500); };
 
   // Generate read-only share link and copy to clipboard
@@ -2660,33 +2680,37 @@ const App: React.FC = () => {
     const sySalaryExpenses = reportExpenses.filter((e: Expense) => e.category === 'Salaries');
     const syOtherExpenses = reportExpenses.filter((e: Expense) => e.category !== 'Salaries');
 
-    const monthRows: { month: string; fees: number; salary: number; otherExp: number; totalExp: number; net: number }[] = [];
-    let grandFees = 0, grandSalary = 0, grandOther = 0, grandTotal = 0, grandNet = 0;
+    const monthRows: { month: string; fees: number; fundIncome: number; salary: number; otherExp: number; fundReturns: number; totalExp: number; net: number }[] = [];
+    let grandFees = 0, grandFundIncome = 0, grandSalary = 0, grandOther = 0, grandFundReturns = 0, grandTotal = 0, grandNet = 0;
     const salaryMonthIndex = (e: Expense) => e.salaryMonth && e.salaryMonth.length >= 7 ? parseInt(e.salaryMonth.substring(5, 7), 10) - 1 : parseMonth(e.date);
     monthsArr.forEach((m, i) => {
       const feesAmt = allFeesPaid.filter((f: Fee) => parseMonth(f.paidDate || f.dueDate) === i).reduce((s: number, f: Fee) => s + f.amount, 0);
+      const fundIncomeAmt = reportFunds.filter((f: any) => f.type === 'income' && parseMonth(f.date) === i).reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0);
       const salaryAmt = sySalaryExpenses.filter((e: Expense) => salaryMonthIndex(e) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
       const otherAmt = syOtherExpenses.filter((e: Expense) => parseMonth(e.date) === i).reduce((s: number, e: Expense) => s + e.amount, 0);
-      const totalExp = salaryAmt + otherAmt;
-      const net = feesAmt - totalExp;
-      if (feesAmt > 0 || totalExp > 0) {
-        monthRows.push({ month: m, fees: feesAmt, salary: salaryAmt, otherExp: otherAmt, totalExp, net });
-        grandFees += feesAmt; grandSalary += salaryAmt; grandOther += otherAmt; grandTotal += totalExp; grandNet += net;
+      const fundReturnsAmt = reportFunds.filter((f: any) => f.type === 'return' && parseMonth(f.date) === i).reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0);
+      const totalExp = salaryAmt + otherAmt + fundReturnsAmt;
+      const net = feesAmt + fundIncomeAmt - totalExp;
+      if (feesAmt > 0 || totalExp > 0 || fundIncomeAmt > 0 || fundReturnsAmt > 0) {
+        monthRows.push({ month: m, fees: feesAmt, fundIncome: fundIncomeAmt, salary: salaryAmt, otherExp: otherAmt, fundReturns: fundReturnsAmt, totalExp, net });
+        grandFees += feesAmt; grandFundIncome += fundIncomeAmt; grandSalary += salaryAmt; grandOther += otherAmt; grandFundReturns += fundReturnsAmt; grandTotal += totalExp; grandNet += net;
       }
     });
 
     autoTable(doc, {
-      head: [['Month', 'Collection (Fees)', 'Salary Expense', 'Other Expenses', 'Total Expenses', 'Net (In - Out)']],
+      head: [['Month', 'Collection (Fees)', 'Fund Income', 'Salary Expense', 'Other Expenses', 'Fund Returns', 'Total Expenses', 'Net (In - Out)']],
       body: monthRows.map(r => [
         r.month + ' ' + sy,
         money(r.fees),
+        money(r.fundIncome),
         money(r.salary),
         money(r.otherExp),
+        money(r.fundReturns),
         money(r.totalExp),
         money(r.net),
       ]),
       foot: [[
-        'TOTAL', money(grandFees), money(grandSalary), money(grandOther), money(grandTotal), money(grandNet),
+        'TOTAL', money(grandFees), money(grandFundIncome), money(grandSalary), money(grandOther), money(grandFundReturns), money(grandTotal), money(grandNet),
       ]],
       startY: 30,
       theme: 'grid',
@@ -2697,8 +2721,10 @@ const App: React.FC = () => {
       columnStyles: {
         0: { cellWidth: 35, halign: 'left', fontStyle: 'bold' },
         1: { textColor: [16, 185, 129] },
-        2: { textColor: [234, 88, 12] },
-        3: { textColor: [147, 51, 234] },
+        2: { textColor: [16, 185, 129] },
+        3: { textColor: [234, 88, 12] },
+        4: { textColor: [147, 51, 234] },
+        5: { textColor: [239, 68, 68] },
         4: { textColor: [220, 38, 38] },
         5: { fontStyle: 'bold' },
       },
@@ -2768,7 +2794,9 @@ const App: React.FC = () => {
     const totalSalary = salaryExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
     const totalOther = otherExpenses.reduce((s: number, e: Expense) => s + e.amount, 0);
     const totalExpenses = totalSalary + totalOther;
-    const closingBalance = totalCollection - totalExpenses;
+    const totalFundIncome = reportFunds.filter((f: any) => f.type === 'income').reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0);
+    const totalFundReturns = reportFunds.filter((f: any) => f.type === 'return').reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0);
+    const closingBalance = totalCollection + totalFundIncome - totalExpenses - totalFundReturns;
 
     const salaryMonthIndex = (e: Expense) => e.salaryMonth && e.salaryMonth.length >= 7 ? parseInt(e.salaryMonth.substring(5, 7), 10) - 1 : parseMonth(e.date);
     const salaryByMonth = monthNames.map((name, i) => ({
@@ -2815,8 +2843,10 @@ const App: React.FC = () => {
       head: [['Particulars', 'Amount (Rs)']],
       body: [
         ['Total Collection', fm(totalCollection)],
+        ['Total Fund Income', fm(totalFundIncome)],
         ['Total Salary Expenses', fm(totalSalary)],
         ['Other Expenses', fm(totalOther)],
+        ['Total Fund Returns', fm(totalFundReturns)],
         ['Total Expenses', fm(totalExpenses)],
         ['Closing Balance', fm(closingBalance)],
       ],
@@ -4444,10 +4474,19 @@ const App: React.FC = () => {
     collectedFees: fees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid').reduce((s: number, f: Fee) => s + f.amount, 0),
     totalExpenses: cyExpenses.reduce((s: number, e: Expense) => s + e.amount, 0),
     totalEmployees: employees.length, activeEmployees: employees.filter(e => e.status === 'ACTIVE').length,
-    netRevenue: fees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid').reduce((s: number, f: Fee) => s + f.amount, 0) - expenses.filter((e: Expense) => e.status === 'paid').reduce((s: number, e: Expense) => s + e.amount, 0)
+    // Unified Net Revenue: Money In − Money Out
+    // Money In = Fees Collected + Fund Income
+    // Money Out = Expenses Paid + Fund Returns
+    totalFundIncome: funds.filter((f: any) => f.type === 'income').reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0),
+    totalFundReturns: funds.filter((f: any) => f.type === 'return').reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0),
+    netRevenue: (fees.filter((f: Fee) => getEffectiveFeeStatus(f) === 'paid').reduce((s: number, f: Fee) => s + f.amount, 0)
+      + funds.filter((f: any) => f.type === 'income').reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0))
+      - (expenses.filter((e: Expense) => e.status === 'paid').reduce((s: number, e: Expense) => s + e.amount, 0)
+      + funds.filter((f: any) => f.type === 'return').reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0))
   };
   const monthsArr = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; const cy = new Date().getFullYear();
-  const chartData = monthsArr.map((m: string, i: number) => ({ month: m, fees: cyFees.filter((f: Fee) => { const d = new Date(f.paidDate || f.dueDate); return d.getFullYear() === cy && d.getMonth() === i; }).reduce((s: number, f: Fee) => s + f.amount, 0), expenses: cyExpenses.filter((e: Expense) => { const d = new Date(e.date); return d.getFullYear() === cy && d.getMonth() === i; }).reduce((s: number, e: Expense) => s + e.amount, 0) }));
+  const cyFunds = getCurrentYearData(funds) as any[];
+  const chartData = monthsArr.map((m: string, i: number) => ({ month: m, fees: cyFees.filter((f: Fee) => { const d = new Date(f.paidDate || f.dueDate); return d.getFullYear() === cy && d.getMonth() === i; }).reduce((s: number, f: Fee) => s + f.amount, 0), expenses: cyExpenses.filter((e: Expense) => { const d = new Date(e.date); return d.getFullYear() === cy && d.getMonth() === i; }).reduce((s: number, e: Expense) => s + e.amount, 0), fundIncome: cyFunds.filter((f: any) => f.type === 'income' && new Date(f.date).getFullYear() === cy && new Date(f.date).getMonth() === i).reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0), fundReturns: cyFunds.filter((f: any) => f.type === 'return' && new Date(f.date).getFullYear() === cy && new Date(f.date).getMonth() === i).reduce((s: number, f: any) => s + (Number(f.amount) || 0), 0) }));
   const expenseCategories: ExpenseCategory[] = cyExpenses.reduce<ExpenseCategory[]>((acc: ExpenseCategory[], e: Expense) => { const ex = acc.find((i: ExpenseCategory) => i.name === e.category); if (ex) ex.value += e.amount; else acc.push({ name: e.category, value: e.amount }); return acc; }, []).sort((a: ExpenseCategory, b: ExpenseCategory) => b.value - a.value).slice(0, 5);
   const COLORS = ['#00f5d4', '#7b2cbf', '#f72585', '#4361ee', '#fca311'];
 
@@ -4499,7 +4538,7 @@ const App: React.FC = () => {
       { id: 'studentlist', icon: FiUsers, label: 'Student List' },
       { id: 'deactivatestudent', icon: FiAlertTriangle, label: 'Deactivated Students' },
       { id: 'studentedit', icon: FiEdit2, label: 'Student Documents' },
-      { id: 'schedule', icon: FiCalendar, label: 'Schedule' },
+      { id: 'funds', icon: FiDollarSign, label: 'Funds' },
       { id: 'correction', icon: FiEdit2, label: 'Correction' },
     ] },
     { id: 'sms', icon: FiSend, label: 'SMS' },
@@ -4539,6 +4578,19 @@ const App: React.FC = () => {
 
   const visibleEmployeesForPage = employees.filter(e => showHiddenEmployees || !e.hidden);
 
+
+  // PIN Authentication Gate — show unlock screen before the main app
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen font-sans" style={{ fontFamily: "'DM Sans', system-ui, sans-serif", backgroundColor: '#0a0a0a', color: 'var(--text-neu)' }}>
+        <PinAuth
+          pin={schoolSettings.appPin || '1809'}
+          onUnlock={() => setIsAuthenticated(true)}
+          onChangePin={handleChangeAppPin}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen font-sans" style={{ fontFamily: "'DM Sans', system-ui, sans-serif", backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)' }}>
@@ -4680,7 +4732,7 @@ const App: React.FC = () => {
       <div className="ml-0 p-8 min-h-[calc(100vh-72px)]" style={{ backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)' }}>
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'sms' ? 'SMS' : activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'schedule' ? 'Schedule / Timetable' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'sms' ? 'SMS' : activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'funds' ? 'Funds — Income & Returns' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -4694,7 +4746,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'schedule', 'studentedit', 'ai', 'sms'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border capitalize transition-all duration-300`} style={timeRange === r ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.04)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)', borderColor: 'transparent' }}>{r}</button>)}</div>}
+        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'funds', 'studentedit', 'ai', 'sms'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border capitalize transition-all duration-300`} style={timeRange === r ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.04)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)', borderColor: 'transparent' }}>{r}</button>)}</div>}
 
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.28, ease: 'easeOut' }}>
@@ -4725,7 +4777,7 @@ const App: React.FC = () => {
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[{ label: 'Total Students', value: stats.totalStudents, icon: FiUsers, color: 'cyan' }, { label: 'Active Students', value: stats.activeStudents, icon: FiUsers, color: 'emerald' }, { label: 'Collected Fees', value: `₹${stats.collectedFees.toLocaleString()}`, icon: FiDollarSign, color: 'yellow' }, { label: 'Total Expenses', value: `₹${stats.totalExpenses.toLocaleString()}`, icon: FiTrendDown, color: 'red' }].map((c, i) => (
+              {[{ label: 'Total Students', value: stats.totalStudents, icon: FiUsers, color: 'cyan' }, { label: 'Active Students', value: stats.activeStudents, icon: FiUsers, color: 'emerald' }, { label: 'Total Money In', value: `₹${(stats.collectedFees + stats.totalFundIncome).toLocaleString()}`, icon: FiDollarSign, color: 'emerald' }, { label: 'Total Money Out', value: `₹${(stats.totalExpenses + stats.totalFundReturns).toLocaleString()}`, icon: FiTrendDown, color: 'red' }].map((c, i) => (
                 <div key={i} className="bg-[#1E1E1E] p-6 rounded-2xl border border-gray-800 hover:border-cyan-500/30 transition-all">
                   <div className="flex items-center justify-between mb-4"><div className={`p-3 bg-${c.color}-500/20 rounded-xl`}><c.icon size={24} className={`text-${c.color}-400`} /></div><span className="flex items-center gap-1 text-sm text-emerald-400"><FiTrendingUp size={14} />+12%</span></div>
                   <p className="text-gray-400 text-sm">{c.label}</p><p className="text-3xl font-bold mt-1">{c.value}</p>
@@ -5221,27 +5273,14 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* ===== SCHEDULE ===== */}
-        {activeTab === 'schedule' && (
-          <ScheduleSection
-            employees={employees}
-            students={students}
+        {/* ===== FUNDS ===== */}
+        {activeTab === 'funds' && (
+          <FundSection
             schoolSettings={schoolSettings}
+            fees={fees}
+            expenses={expenses}
             showNotification={showNotification}
-            addSubject={addSubject}
-            getSubjects={getSubjects}
-            updateSubject={updateSubject}
-            deleteSubject={deleteSubject}
-            saveTeacherSubjects={saveTeacherSubjects}
-            getTeacherSubjects={getTeacherSubjects}
-            deleteTeacherSubject={deleteTeacherSubject}
-            saveTimetableEntries={saveTimetableEntries}
-            getTimetableEntries={getTimetableEntries}
-            deleteTimetableForClass={deleteTimetableForClass}
-            deleteTimetableEntry={deleteTimetableEntry}
-            saveSubjectConfig={saveSubjectConfig}
-            getSubjectConfigs={getSubjectConfigs}
-            deleteSubjectConfig={deleteSubjectConfig}
+            isReadOnly={isReadOnly}
           />
         )}
 
@@ -5412,14 +5451,14 @@ const App: React.FC = () => {
                 <p className="text-2xl font-bold text-white">{stats.activeEmployees}</p>
               </div>
               <div className="bg-[#1E1E1E] p-5 rounded-xl border border-gray-800">
-                <div className="flex items-center justify-between mb-2"><FiDollarSign className="text-yellow-400" size={20} /><span className="text-xs text-emerald-400">Collected</span></div>
-                <p className="text-gray-400 text-xs">Total Fees ({cy})</p>
-                <p className="text-2xl font-bold text-white">₹{stats.collectedFees.toLocaleString()}</p>
+                <div className="flex items-center justify-between mb-2"><FiDollarSign className="text-emerald-400" size={20} /><span className="text-xs text-emerald-400">Money In</span></div>
+                <p className="text-gray-400 text-xs">Fees + Fund Income</p>
+                <p className="text-2xl font-bold text-white">₹${(stats.collectedFees + stats.totalFundIncome).toLocaleString()}</p>
               </div>
               <div className="bg-[#1E1E1E] p-5 rounded-xl border border-gray-800">
-                <div className="flex items-center justify-between mb-2"><FiTrendDown className="text-red-400" size={20} /><span className="text-xs text-red-400">Spent</span></div>
-                <p className="text-gray-400 text-xs">Total Expenses ({cy})</p>
-                <p className="text-2xl font-bold text-white">₹{stats.totalExpenses.toLocaleString()}</p>
+                <div className="flex items-center justify-between mb-2"><FiTrendDown className="text-red-400" size={20} /><span className="text-xs text-red-400">Money Out</span></div>
+                <p className="text-gray-400 text-xs">Expenses + Fund Returns</p>
+                <p className="text-2xl font-bold text-white">₹${(stats.totalExpenses + stats.totalFundReturns).toLocaleString()}</p>
               </div>
               <div className="bg-[#1E1E1E] p-5 rounded-xl border border-gray-800">
                 <div className="flex items-center justify-between mb-2"><FiTrendingUp className="text-emerald-400" size={20} /><span className="text-xs text-emerald-400">Net</span></div>

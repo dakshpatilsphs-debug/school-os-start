@@ -80,6 +80,16 @@ export const getExpenses = async () => {
 export const updateExpense = async (id: string, data: any) => updateDoc(doc(db, 'expenses', id), data);
 export const deleteExpense = async (id: string) => deleteDoc(doc(db, 'expenses', id));
 
+// ===== Fund Functions (Income + Return) =====
+export const addFund = async (fund: any) => addDoc(collection(db, 'funds'), { ...fund, createdAt: Timestamp.now() });
+export const getFunds = async () => {
+  const q = query(collection(db, 'funds'), orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+};
+export const updateFund = async (id: string, data: any) => updateDoc(doc(db, 'funds', id), data);
+export const deleteFund = async (id: string) => deleteDoc(doc(db, 'funds', id));
+
 // ===== Employee Functions =====
 
 // ----- Causal Leaves -----

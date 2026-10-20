@@ -1,8 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { FiSend, FiMessageSquare, FiUsers, FiCheck, FiX, FiPhone, FiMail, FiZap } from 'react-icons/fi';
-
-const DEFAULT_SMS_TOKEN = '681f0d5d-024e-452d-bbbc-6595b974c478';
-const DEFAULT_SMS_ENDPOINT = '/smsgw';
+import { resolveTextBeesConfig, sendSms, TextBeesSmsConfig } from './smsService';
 
 export interface SmsSectionProps {
   students: any[];
@@ -13,51 +11,11 @@ export interface SmsSectionProps {
   smsIp?: string;
 }
 
-const resolveSmsEndpoint = (endpoint?: string, ip?: string): string => {
-  const ep = (endpoint || '').trim();
-  const host = (ip || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  // Absolute URL wins
-  if (ep.startsWith('http://') || ep.startsWith('https://')) return ep;
-  // Custom relative path (not default) — use as-is; if host provided and ep is default, host takes over
-  if (ep && ep !== '/smsgw' && ep !== '/' ) return ep;
-  if (host) return `http://${host}`;
-  return ep || DEFAULT_SMS_ENDPOINT;
-};
-
-const resolveSmsToken = (token?: string): string => {
-  if (token && token.trim()) return token.trim();
-  if (typeof window !== 'undefined') {
-    try {
-      const ls = localStorage.getItem('smsToken');
-      if (ls && ls.trim()) return ls.trim();
-      // Fallback to schoolSettings stored token
-      const ss = localStorage.getItem('schoolSettings');
-      if (ss) {
-        const parsed = JSON.parse(ss);
-        if (parsed.smsToken) return parsed.smsToken;
-      }
-    } catch {}
-  }
-  return DEFAULT_SMS_TOKEN;
-};
-
 export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNotification, smsToken, smsEndpoint, smsIp }) => {
-  const SMS_TOKEN = resolveSmsToken(smsToken);
-  const SMS_ENDPOINT = resolveSmsEndpoint(smsEndpoint, smsIp);
-  const isDev = (import.meta as any).env?.DEV;
-  const getSmsFetchInfo = (): { url: string; extraHeaders: Record<string, string> } => {
-    if (isDev) {
-      // In dev (localhost:5173) browsers block cross-origin to 192.168.x.x — always proxy via /smsgw
-      if (SMS_ENDPOINT.startsWith('http://') || SMS_ENDPOINT.startsWith('https://')) {
-        return { url: '/smsgw', extraHeaders: { 'X-SMS-Target': SMS_ENDPOINT } };
-      }
-      // Relative like /smsgw — also goes via proxy, plugin will use default or header host
-      return { url: SMS_ENDPOINT, extraHeaders: {} };
-    }
-    return { url: SMS_ENDPOINT, extraHeaders: {} };
-  };
+  const SMS_CONFIG: TextBeesSmsConfig = resolveTextBeesConfig({ smsToken, smsEndpoint, smsIp });
   const [mode, setMode] = useState<'single' | 'bulk'>('single');
   const [phone, setPhone] = useState('');
+  const [testPhone, setTestPhone] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [bulkClass, setBulkClass] = useState('');
@@ -74,28 +32,41 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
 
   const sendOne = useCallback(async () => {
     if (!phone.trim() || !message.trim()) { showNotification('Phone and message required', 'error'); return; }
-    if (!SMS_TOKEN) { showNotification('SMS Token missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
+    if (!SMS_CONFIG.apiKey) { showNotification('TextBees API Key missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
     setSending(true);
     try {
-      const { url: fetchUrl, extraHeaders } = getSmsFetchInfo();
-      const res = await fetch(fetchUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': SMS_TOKEN, ...extraHeaders },
-        body: JSON.stringify({ to: phone.trim(), message: message.trim() })
-      });
-      const text = await res.text();
-      if (res.ok) {
+      const result = await sendSms(SMS_CONFIG, phone.trim(), message.trim());
+      if (result.success) {
         showNotification('SMS sent successfully', 'success');
         setMessage('');
       } else {
-        showNotification(`Failed: ${res.status} ${text}`, 'error');
+        showNotification(`Failed: ${result.message}`, 'error');
       }
     } catch (e: any) {
       showNotification('Failed: ' + (e?.message || 'Network error'), 'error');
     } finally {
       setSending(false);
     }
-  }, [phone, message, showNotification, SMS_TOKEN, SMS_ENDPOINT]);
+  }, [phone, message, showNotification, SMS_CONFIG]);
+
+  const testSms = useCallback(async () => {
+    if (!testPhone.trim()) { showNotification('Enter a phone number to test', 'error'); return; }
+    if (!SMS_CONFIG.apiKey) { showNotification('TextBees API Key missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
+    setSending(true);
+    try {
+      const result = await sendSms(SMS_CONFIG, testPhone.trim(), 'Test SMS from School Management System — connection successful!');
+      if (result.success) {
+        showNotification('Test SMS sent successfully!', 'success');
+        setTestPhone('');
+      } else {
+        showNotification(`Test failed: ${result.message}`, 'error');
+      }
+    } catch (e: any) {
+      showNotification('Test failed: ' + (e?.message || 'Network error'), 'error');
+    } finally {
+      setSending(false);
+    }
+  }, [testPhone, showNotification, SMS_CONFIG]);
 
   const getUnpaidAmount = (s: any): number => {
     const sf = fees.filter((f: any) => f.studentId === s.autoId || (s.secondaryAutoId && f.secondaryAutoId === s.secondaryAutoId));
@@ -155,26 +126,19 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
   const runBulk = useCallback(async () => {
     if (recipients.length === 0) { showNotification('No recipients found', 'error'); return; }
     if (!message.trim()) { showNotification('Message template required — use {name} {amount}', 'error'); return; }
-    if (!SMS_TOKEN) { showNotification('SMS Token missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
+    if (!SMS_CONFIG.apiKey) { showNotification('TextBees API Key missing — set in School Settings → SMS Gateway and Save', 'error'); return; }
     if (!confirm(`Send to ${recipients.length} recipients? There is a 10-second gap between messages.`)) return;
     setSending(true);
     setBulkProgress({ sent: 0, total: recipients.length, failed: 0 });
     setBulkResults([]);
     const results: string[] = [];
-    // In dev, resolve once and reuse for all bulk sends (same gateway)
-    const bulkFetchInfo = getSmsFetchInfo();
     for (let i = 0; i < recipients.length; i++) {
       const s = recipients[i];
       const msg = replacePlaceholders(message, s);
       try {
-        const res = await fetch(bulkFetchInfo.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': SMS_TOKEN, ...bulkFetchInfo.extraHeaders },
-          body: JSON.stringify({ to: s.parentPhone || '', message: msg })
-        });
-        const text = await res.text();
-        if (!res.ok) results.push(`${s.name}: ${res.status} ${text}`);
-        setBulkProgress(prev => ({ ...prev, sent: prev.sent + 1, failed: prev.failed + (!res.ok ? 1 : 0) }));
+        const result = await sendSms(SMS_CONFIG, s.parentPhone || '', msg);
+        if (!result.success) results.push(`${s.name}: ${result.message}`);
+        setBulkProgress(prev => ({ ...prev, sent: prev.sent + 1, failed: prev.failed + (!result.success ? 1 : 0) }));
         await new Promise(r => setTimeout(r, 10000));
       } catch (e: any) {
         results.push(`${s.name}: ${e?.message || 'Error'}`);
@@ -185,14 +149,14 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
     setBulkProgress(prev => ({ ...prev, failed: results.length }));
     showNotification(`Sent: ${recipients.length - results.length} · Failed: ${results.length}`, results.length > 0 ? 'error' : 'success');
     setSending(false);
-  }, [recipients, message, showNotification, SMS_TOKEN, SMS_ENDPOINT]);
+  }, [recipients, message, showNotification, SMS_CONFIG]);
 
-  const proxyActive = isDev && (SMS_ENDPOINT.startsWith('http://') || SMS_ENDPOINT.startsWith('https://'));
-  const displayEndpoint = proxyActive ? `${SMS_ENDPOINT} (via dev proxy /smsgw)` : SMS_ENDPOINT;
+  const displayEndpoint = SMS_CONFIG.baseUrl + (SMS_CONFIG.senderId ? ` (sender: ${SMS_CONFIG.senderId})` : '');
+  const hasApiKey = Boolean(SMS_CONFIG.apiKey);
   return (
     <div className="space-y-6">
       <div className="bg-[#1E1E1E] rounded-xl border border-gray-800 p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2 text-gray-400"><FiSend className="text-cyan-400" /> Gateway: <code className="bg-gray-800 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-xs break-all" title={proxyActive ? `Dev proxy: /smsgw → ${SMS_ENDPOINT} (header X-SMS-Target)` : SMS_ENDPOINT}>{displayEndpoint}</code> <span className="hidden sm:inline text-gray-500">• Token: {SMS_TOKEN ? `${SMS_TOKEN.slice(0,6)}…${SMS_TOKEN.slice(-4)}` : '(empty)'} {SMS_TOKEN ? '✓' : '⚠ missing'}</span>{proxyActive && <span className="hidden lg:inline text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">dev proxy active — no CORS</span>}</div>
+        <div className="flex items-center gap-2 text-gray-400"><FiSend className="text-cyan-400" /> Gateway: <code className="bg-gray-800 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-xs break-all" title={SMS_CONFIG.baseUrl}>{displayEndpoint}</code> <span className="hidden sm:inline text-gray-500">• Key: {hasApiKey ? `${SMS_CONFIG.apiKey.slice(0,6)}…${SMS_CONFIG.apiKey.slice(-4)}` : '(empty)'} {hasApiKey ? '✓' : '⚠ missing'}</span></div>
         <span className="text-[11px] text-gray-500">Edit in <b>School Settings → SMS Gateway</b> (Save persists to Firebase)</span>
       </div>
       <div className="flex gap-2 mb-4">
@@ -204,8 +168,12 @@ export const SmsSection: React.FC<SmsSectionProps> = ({ students, fees, showNoti
           <div className="flex items-center gap-2 text-lg font-bold"><FiMessageSquare className="text-cyan-400" /> Send SMS</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-xs text-cyan-400 mb-1">Phone</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" placeholder="Phone number" /></div>
+            <div><label className="block text-xs text-cyan-400 mb-1">Test Phone</label><input type="tel" value={testPhone} onChange={e => setTestPhone(e.target.value)} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white" placeholder="Enter number to test" /></div>
           </div>
-          <div><label className="block text-xs text-cyan-400 mb-1">Message — हिंदी / मराठी supported (Unicode UTF-8)</label><textarea value={message} onChange={e => setMessage(e.target.value)} rows={4} lang={/[\u0900-\u097F]/.test(message) ? 'hi' : undefined} className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white placeholder:text-gray-500" style={{ fontFamily: "'Noto Sans Devanagari','DM Sans',system-ui,sans-serif" }} placeholder="Type message... e.g. नमस्ते {parentName}, {name} की फीस बाकी है। / नमस्कार {parentName}, {name} ची फी बाकी आहे." /><p className="text-[11px] text-gray-400 mt-1">/{/[\u0900-\u097F]/.test(message) ? ' Unicode (Devanagari ~70 chars/segment)' : ' GSM (160 chars/segment)'} • {message.length} chars • {message.trim() ? 'UTF-8 JSON will be sent' : 'Type in English, हिंदी or मराठी'}</p></div>
+          <div className="flex gap-2 mt-2">
+            <button onClick={sendOne} disabled={sending} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold hover:from-cyan-600 hover:to-blue-600 shadow-lg shadow-cyan-500/20 disabled:opacity-60">{sending ? 'Sending…' : 'Send SMS'}</button>
+            <button onClick={testSms} disabled={sending} className="px-4 py-3 rounded-xl bg-gradient-to-r from-gray-600 to-gray-700 text-white font-bold hover:from-gray-500 hover:to-gray-600 shadow-lg disabled:opacity-60">{sending ? 'Testing…' : 'Test SMS'}</button>
+          </div>
           <button onClick={() => setShowAiSingle(v => !v)} aria-expanded={showAiSingle} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#E0E5EC] text-[#6C63FF] text-sm font-semibold" style={{ boxShadow: showAiSingle ? 'inset 4px 4px 8px rgb(163,177,198,0.6), inset -4px -4px 8px rgba(255,255,255,0.6)' : '5px 5px 10px rgb(163,177,198,0.6), -5px -5px 10px rgba(255,255,255,0.5)' }}><FiZap size={14} /> Write with AI</button>
           {showAiSingle && (
             <div className="bg-[#E0E5EC] rounded-2xl p-4 space-y-3" style={{ boxShadow: 'inset 6px 6px 10px rgb(163,177,198,0.6), inset -6px -6px 10px rgba(255,255,255,0.5)' }}>

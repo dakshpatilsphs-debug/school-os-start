@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText, FiSave, FiCheck, FiAlertCircle, FiSend } from 'react-icons/fi';
+import { FiX, FiUpload, FiEye, FiSettings, FiPlus, FiDollarSign, FiCalendar, FiUser, FiTag, FiFileText, FiSave, FiCheck, FiAlertCircle, FiSend, FiLock } from 'react-icons/fi';
 import { Student, Fee, Expense, Employee } from './types';
 
 interface ModalProps {
@@ -197,6 +197,26 @@ export const AppModals: React.FC<ModalProps> = (p) => {
         <div className="space-y-1"><label className="text-xs text-cyan-400">Primary Color</label><div className="flex gap-2"><input type="color" value={p.schoolSettings.primaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, primaryColor: e.target.value })} className="w-12 h-10 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer" /><input value={p.schoolSettings.primaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, primaryColor: e.target.value })} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-mono" /></div></div>
         <div className="space-y-1"><label className="text-xs text-cyan-400">Secondary Color</label><div className="flex gap-2"><input type="color" value={p.schoolSettings.secondaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, secondaryColor: e.target.value })} className="w-12 h-10 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer" /><input value={p.schoolSettings.secondaryColor} onChange={e => p.setSchoolSettings({ ...p.schoolSettings, secondaryColor: e.target.value })} className="flex-1 p-3 bg-gray-800 rounded-lg border border-gray-700 text-white font-mono" /></div></div>
         <div className="space-y-1 col-span-2"><label className="text-xs text-cyan-400">School Logo</label><div className="flex items-center gap-4">{p.schoolSettings.schoolLogo && <img src={p.schoolSettings.schoolLogo} alt="Logo" className="w-20 h-20 rounded-lg border-2 border-cyan-500" />}<label className="flex-1 flex items-center gap-2 p-3 bg-gray-800 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition"><FiUpload /><span>{p.schoolSettings.schoolLogo ? 'Change Logo' : 'Upload Logo'}</span><input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => p.setSchoolSettings({ ...p.schoolSettings, schoolLogo: ev.target?.result as string }); r.readAsDataURL(f); }} className="hidden" /></label></div></div>
+      </div>
+
+      {/* ===== App PIN / Startup Lock ===== */}
+      <div className="border-t border-gray-700 pt-4 mt-2 space-y-4">
+        <h3 className="text-base font-bold text-purple-400 flex items-center gap-2"><FiLock /> App PIN (Startup Lock)</h3>
+        <p className="text-xs text-gray-500">A 4-digit PIN is required to open the app on startup. Change it here and hit Save. Stored to Firebase + localStorage.</p>
+        <div className="space-y-1">
+          <label className="text-xs text-cyan-400">App PIN (4 digits)</label>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              maxLength={4}
+              value={p.schoolSettings.appPin || '1809'}
+              onChange={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 4); p.setSchoolSettings({ ...p.schoolSettings, appPin: v }); }}
+              placeholder="1809"
+              className="w-48 p-3 bg-gray-800 border border-gray-600 rounded-xl text-white font-mono text-center focus:outline-none focus:border-cyan-500"
+            />
+            <p className="text-[11px] text-gray-500">Default: 1809</p>
+          </div>
+        </div>
       </div>
 
       {/* ===== SMS Gateway Settings ===== */}

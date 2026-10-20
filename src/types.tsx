@@ -41,6 +41,23 @@ export interface Expense {
   date: string; paidTo: string; employeeId?: string; studentId?: string; status: 'paid' | 'pending'; billUrl?: string;
   salaryMonth?: string;
 }
+
+export interface Fund {
+  id?: string;
+  autoId: string;
+  type: 'income' | 'return';
+  amount: number;
+  description: string;
+  date: string;
+  status: 'pending' | 'completed';
+  // Toggle: if this income will be returned later
+  willBeReturned: boolean;
+  returnAmount: number;        // how much will be returned (if willBeReturned)
+  returnedAmount: number;      // how much has been returned so far
+  returnedDate?: string;       // date when returned
+  paidTo?: string;             // recipient for return
+  employeeId?: string;
+}
 export interface Employee {
   id?: string;
   autoId: string;
