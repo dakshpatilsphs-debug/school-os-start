@@ -1,4 +1,5 @@
 import { Attendance, Employee, Holiday } from './types';
+import { calcSalary } from './salaryCalc';
 
 // CL rules (manual approval system) — updated for half-day (late) approval:
 // - CL quota is per academic year (June–May). Unused CL carries forward month to month.
@@ -125,9 +126,9 @@ export const getMonthAttSummary = (empId: string, monthKey: string, attendance: 
   for (let day = 1; day <= daysInMonth; day++) {
     const ds = `${monthKey}-${String(day).padStart(2, '0')}`;
     const d = new Date(ds + 'T12:00:00');
-    if (d.getDay() === 0) continue; // Skip Sundays only (not paid)
+    // Count ALL days as working/paid days including Sundays and manual holidays
     const isManualHoliday = holidays?.some(h => h && h.date === ds && h.type === 'manual');
-    if (isManualHoliday) holidaysCount++; // Manual holidays count as paid working days
+    if (isManualHoliday) holidaysCount++;
     workingDays++;
   }
 
@@ -170,18 +171,19 @@ export const getMonthDeductionInfo = (emp: Employee, monthKey: string): { amount
 export const getEarnedSalaryForMonth = (emp: Employee, monthKey: string, attendance: Attendance[], holidays?: Holiday[], salaryOverride?: number): { earned: number; perDay: number; paidDays: number; deductions: number; workingDays: number } => {
   const summ = getMonthAttSummary(emp.autoId, monthKey, attendance, holidays);
   const monthlySalary = salaryOverride ?? emp.salary ?? 0;
-  const perDay = summ.workingDays > 0 ? monthlySalary / summ.workingDays : 0;
-  if (summ.records.length === 0) {
-    return { earned: monthlySalary, perDay, paidDays: summ.workingDays, deductions: 0, workingDays: summ.workingDays };
-  }
-  const lateApproved = (summ as any).lateApproved ?? 0;
-  const latePending = (summ as any).latePending ?? 0;
-  const lateDisapproved = (summ as any).lateDisapproved ?? 0;
-  const holidaysCount = (summ as any).holidaysCount ?? 0;
-  const paidDays = summ.present + lateApproved + latePending + summ.clApproved + holidaysCount + (lateDisapproved * 0.5);
-  const earned = Math.round(paidDays * perDay);
-  const halfDed = lateDisapproved * 0.5 * perDay;
-  const fullDed = summ.absent * perDay;
-  const deductions = Math.round(fullDed + halfDed);
-  return { earned, perDay, paidDays, deductions, workingDays: summ.workingDays };
+  // Use centralized calcSalary — workingDays from summary is only for display
+  const result = calcSalary({
+    monthlySalary,
+    monthKey,
+    absentDays: summ.absent,
+    halfDays: summ.lateDisapproved,
+    otherDeduction: 0,
+  });
+  return {
+    earned: result.netSalary,
+    perDay: result.perDay,
+    paidDays: result.divisor - result.deductionDays,
+    deductions: result.totalDeduction,
+    workingDays: summ.workingDays,
+  };
 };

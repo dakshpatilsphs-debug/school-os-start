@@ -26,6 +26,8 @@ import {
   saveSubjectConfig, getSubjectConfigs, deleteSubjectConfig,
 
 } from './firebase';
+import { setDoc, doc, Timestamp } from 'firebase/firestore';
+import { db } from './firebase';
 import { Student, Fee, Expense, Fund, Employee, Equipment, Attendance as Att, Holiday, SchoolLogo } from './types';
 import { getColors as getPDFColors, getPDFColorsFromSettings, drawHeader as pdfHeader, drawFooter as pdfFooter, drawCoverPage as pdfCover, fmtDate as pdfDate, money as pdfMoney, getStatusColor as pdfStatusColor } from './PDFHelper';
 import { AppModals } from './Modals';
@@ -35,13 +37,15 @@ import type { SalarySlipData } from './salarySlipTypes';
 import AIAssistant from './components/AIAssistant';
 import { SmsSection } from './SmsSection';
 import { PinAuth } from './PinAuth';
+import { SalaryDeductionCalculator } from './SalaryDeductionCalculator';
 import { motion, AnimatePresence } from 'framer-motion';
 import { translations, t as tr } from './i18n';
 import { exportProperExcel, studentColumns, feeColumns, expenseColumns, employeeColumns, equipmentColumns, feesByStudentColumns, exportSampleExcel } from './utils/excelHelper';
 
-type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'funds' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'correction' | 'studentedit' | 'ai' | 'sms';
+type Tab = 'dashboard' | 'studentadd' | 'studentlist' | 'deactivatestudent' | 'fees' | 'feesbystudent' | 'expenses' | 'funds' | 'employees' | 'equipments' | 'attendance' | 'reports' | 'correction' | 'studentedit' | 'ai' | 'sms' | 'salaryDeduction';
 
-import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered, getCurrentMonthKey as getClCurrentMonth, getEarnedSalaryForMonth } from './clUtils';
+import { getClAnnualQuota as getEmpClQuota, getClUsedTotal, isClCovered, getCurrentMonthKey as getClCurrentMonth, getMonthDeductionInfo, getMonthAttSummary, getEarnedSalaryForMonth } from './clUtils';
+import { calcSalary } from './salaryCalc';
 
 const generateSecondaryStudentId = (name?: string, studentClass?: string, roll?: string) => {
   const n = (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'STU';
@@ -49,6 +53,10 @@ const generateSecondaryStudentId = (name?: string, studentClass?: string, roll?:
   const r = (roll || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   return `S2-${n}-${c || 'NA'}-${r || 'NA'}`;
 };
+
+// Helper: extract numeric amount from monthDeduction value (can be number or { amount, description })
+
+
 
 const App: React.FC = () => {
   const isAdminMode = (import.meta as any).env?.VITE_ADMIN_MODE === 'true';
@@ -881,7 +889,10 @@ const App: React.FC = () => {
   };
   const getLatestEmployeeDeduction = (employee: Employee): { amount: number; month?: string } => {
     const month = getLatestDeductMonth(employee);
-    if (month && (employee.monthDeduction?.[month] || 0) > 0) return { amount: employee.monthDeduction![month] || 0, month };
+    if (month) {
+      const info = getMonthDeductionInfo(employee, month);
+      if (info.amount > 0) return { amount: info.amount, month };
+    }
     return { amount: employee.otherDeduction || 0 };
   };
   // Roll number RESETS per class (10A → 001, 002; 10B → 001, 002)
@@ -1337,17 +1348,9 @@ const App: React.FC = () => {
   const openDeductPopover = (emp: Employee) => {
     const targetMonth = getMonthKey(new Date());
     setDeductMonth(targetMonth);
-    const raw = (emp as any).monthDeduction?.[targetMonth];
-    let curAmt: any = raw;
-    let curDesc = '';
-    if (raw != null && typeof raw === 'object' && 'amount' in raw) {
-      curAmt = (raw as any).amount;
-      curDesc = String((raw as any).description || '');
-    } else if (raw != null) {
-      curDesc = String((emp as any).monthDeductionDesc?.[targetMonth] || '');
-    } else {
-      curDesc = String((emp as any).otherDeductionDesc || '');
-    }
+    const info = getMonthDeductionInfo(emp, targetMonth);
+    let curAmt: any = info.amount;
+    let curDesc = info.description || '';
     setDeductPopoverEmpId(emp.id || '');
     setDeductAmount(curAmt != null ? String(curAmt) : '');
     setDeductDesc(curDesc || '');
@@ -1672,8 +1675,15 @@ const App: React.FC = () => {
       }
 
       const monthlySalary = sd ? sd.salary.monthlyGross : ((emp.monthSalary?.[currentMonth] ?? emp.salary) || 0);
-      const perDaySalary = sd ? sd.salary.perDaySalary : (workingDays > 0 ? monthlySalary / workingDays : 0);
-      const earnedSalary = sd ? sd.salary.earnedSalary : Math.round((presentDays + lateDays + clCovered) * perDaySalary);
+      const result = calcSalary({
+        monthlySalary,
+        monthKey: currentMonth,
+        absentDays: absentDays,
+        halfDays: empAttendance.filter(a => a.status === 'late' && a.clStatus === 'disapproved').length,
+        otherDeduction: getMonthDeductionInfo(emp, currentMonth).amount,
+      });
+      const perDaySalary = result.perDay;
+      const earnedSalary = result.netSalary;
 
       // CL annual quota (manual approval system — no monthly limit)
       const annualQuota = getEmpClQuota(emp);
@@ -1783,7 +1793,7 @@ const App: React.FC = () => {
         ['Travelling Allowance', 'Rs 0'],
         ['Medical Allowance', 'Rs 0'],
       ];
-      const otherDed = sd ? (sd.salary.deductions || 0) : ((emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0);
+      const otherDed = sd ? (sd.salary.deductions || 0) : getMonthDeductionInfo(emp, currentMonth).amount;
       const deductItems: [string, string][] = [
         ['EPF(%)', 'Rs 0'],
         ['PF(%)', 'Rs 0'],
@@ -1862,7 +1872,7 @@ const App: React.FC = () => {
       doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sText);
       doc.text('Net Pay (A-B)', sumTableX + padLg, ss + 7);
       doc.setFontSize(13); doc.setTextColor(...sPrimaryDark);
-      doc.text(money(earnedSalary - otherDed), valX, ss + 7, { align: 'right' });
+      doc.text(money(result.netSalary), valX, ss + 7, { align: 'right' });
 
       // ============ 5. FOOTER ============
       doc.setDrawColor(...sBorder); doc.setLineWidth(0.12);
@@ -1923,8 +1933,13 @@ const App: React.FC = () => {
       if (!isSun && !isHol) workingDays++;
     }
     const monthlySalary = (emp.monthSalary?.[currentMonth] ?? emp.salary) || 0;
-    const perDaySalary = workingDays > 0 ? monthlySalary / workingDays : 0;
-    const earnedSalary = Math.round((presentDays + lateDays + clCovered) * perDaySalary);
+    const result = calcSalary({
+      monthlySalary,
+      monthKey: currentMonth,
+      absentDays: absentDays,
+      halfDays: empAttendance.filter(a => a.status === 'late' && a.clStatus === 'disapproved').length,
+      otherDeduction: getMonthDeductionInfo(emp, currentMonth).amount,
+    });
     const annualQuota = getEmpClQuota(emp);
     const usedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
     const remainingAnnual = Math.max(0, annualQuota - usedTotal);
@@ -1954,10 +1969,10 @@ const App: React.FC = () => {
       },
       salary: {
         monthlyGross: monthlySalary,
-        perDaySalary: Math.round(perDaySalary),
-        earnedSalary,
+        perDaySalary: result.perDay,
+        earnedSalary: result.netSalary,
         allowances: 0,
-        deductions: (emp.monthDeduction?.[currentMonth] ?? emp.otherDeduction) || 0,
+        deductions: result.totalDeduction,
       },
       payPeriod: monthName,
     };
@@ -2042,17 +2057,19 @@ const App: React.FC = () => {
         if (hList.some(h => h && h.date === ds && h.type === 'manual')) continue;
         workingDays++;
       }
-    const perDaySalary = monthlySalary / (workingDays || 1);
+    const result = calcSalary({
+      monthlySalary,
+      monthKey: month,
+      absentDays: absentDays,
+      halfDays: empAttendance.filter(a => a.status === 'late' && a.clStatus === 'disapproved').length,
+      otherDeduction: getMonthDeductionInfo(emp, month).amount,
+    });
     const annualQuota = getEmpClQuota(emp);
     const usedTotal = getClUsedTotal(emp.autoId, month, attendance);
     const remainingAnnual = Math.max(0, annualQuota - usedTotal);
     const clUsed = usedTotal;
-    const effPresent = presentDays + lateDays + clCovered;
-    const effAbsent = absentDays;
-    const earnedSalary = Math.round(effPresent * perDaySalary);
     const clLeft = Math.max(0, remainingAnnual);
-    const deduction = (emp.monthDeduction?.[month] ?? emp.otherDeduction) || 0;
-    const netSalary = Math.max(0, earnedSalary - deduction);
+    const effAbsent = absentDays;
 
       // Build daily grid only for visual (mark only days with actual attendance records)
       const daily: { day: number; status: string }[] = [];
@@ -2066,7 +2083,7 @@ const App: React.FC = () => {
         daily.push({ day, status });
       }
 
-      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary, earnedSalary, deduction, netSalary, clUsed, clLeft, effAbsent, daysInMonth };
+      return { daily, workingDays, presentDays, absentDays, monthlySalary, perDaySalary: result.perDay, earnedSalary: result.netSalary, deduction: result.totalDeduction, netSalary: result.netSalary, clUsed, clLeft, effAbsent, daysInMonth };
     };
 
     const drawPageHeader = () => {
@@ -2723,10 +2740,8 @@ const App: React.FC = () => {
         1: { textColor: [16, 185, 129] },
         2: { textColor: [16, 185, 129] },
         3: { textColor: [234, 88, 12] },
-        4: { textColor: [147, 51, 234] },
-        5: { textColor: [239, 68, 68] },
         4: { textColor: [220, 38, 38] },
-        5: { fontStyle: 'bold' },
+        5: { textColor: [239, 68, 68], fontStyle: 'bold' },
       },
       margin: { left: ML, right: ML },
       didParseCell: (data) => {
@@ -4532,6 +4547,7 @@ const App: React.FC = () => {
       { id: 'feesbystudent', icon: FiUsers, label: 'Fees by Student' },
       { id: 'expenses_list', icon: FiTrendingDown, label: 'Expenses List' },
       { id: 'attendance', icon: FiCheck, label: 'Attendance' },
+      { id: 'salaryDeduction', icon: FiDollarSign, label: 'Salary Deduction' },
     ] },
     { id: 'reports', icon: FiPieChart, label: 'Reports', children: [
       { id: 'reports_overview', icon: FiPieChart, label: 'Reports Overview' },
@@ -4560,7 +4576,7 @@ const App: React.FC = () => {
     }
     return (allowedAdminTabs as string[]).includes(item.id) ? item : null;
   }).filter(Boolean) as typeof navItems : navItems;
-  const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : ['studentadd', 'studentlist', 'deactivatestudent'].includes(activeTab) ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : 'Employee Management';
+  const modalTitle = showClassMgmt ? 'Manage Classes' : showPackageMgmt ? 'Manage Packages' : showDocumentMgmt ? 'Manage Submitted Documents' : showSettings ? 'School Settings' : ['studentadd', 'studentlist', 'deactivatestudent'].includes(activeTab) ? 'Student Management' : activeTab === 'fees' ? 'Fee Management' : activeTab === 'expenses' ? 'Expense Management' : activeTab === 'equipments' ? 'Equipment Management' : activeTab === 'salaryDeduction' ? 'Salary Deduction Calculator' : 'Employee Management';
 
   const searchBtn = "flex items-center gap-2 bg-[#1E1E1E] border border-gray-800 px-5 py-3 rounded-xl transition-all";
 
@@ -4732,7 +4748,7 @@ const App: React.FC = () => {
       <div className="ml-0 p-8 min-h-[calc(100vh-72px)]" style={{ backgroundColor: 'var(--bg-neu)', color: 'var(--text-neu)' }}>
         <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'sms' ? 'SMS' : activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'funds' ? 'Funds — Income & Returns' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent capitalize">{activeTab === 'sms' ? 'SMS' : activeTab === 'feesbystudent' ? 'Fees by Student' : activeTab === 'funds' ? 'Funds — Income & Returns' : activeTab === 'salaryDeduction' ? 'Salary Deduction Calculator' : activeTab === 'correction' ? 'Correction / Re-sequence' : activeTab === 'studentedit' ? 'Student Document Edit' : activeTab === 'ai' ? 'AI Assistant' : activeTab === 'studentadd' ? 'Student Add' : activeTab === 'studentlist' ? 'Student List' : activeTab === 'deactivatestudent' ? 'Deactivate Student' : activeTab}</h1>
             <p className="text-gray-400 mt-2 flex items-center gap-2"><FiCalendar size={14} />{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -4746,7 +4762,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'funds', 'studentedit', 'ai', 'sms'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border capitalize transition-all duration-300`} style={timeRange === r ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.04)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)', borderColor: 'transparent' }}>{r}</button>)}</div>}
+        {!['studentadd', 'studentlist', 'deactivatestudent', 'feesbystudent', 'employees', 'equipments', 'attendance', 'reports', 'funds', 'salaryDeduction', 'studentedit', 'ai', 'sms'].includes(activeTab) && <div className="flex gap-2 mb-8 flex-wrap">{['week', 'month', 'quarter', 'year', 'all'].map(r => <button key={r} onClick={() => setTimeRange(r)} className={`px-5 py-2 rounded-xl border capitalize transition-all duration-300`} style={timeRange === r ? { backgroundColor: 'var(--bg-neu)', color: 'var(--accent)', boxShadow: 'inset 4px 4px 8px var(--dark-shadow), inset -4px -4px 8px var(--light-shadow)', borderColor: 'rgba(255,255,255,0.04)' } : { backgroundColor: 'var(--bg-neu)', color: 'var(--text-muted)', boxShadow: '5px 5px 10px var(--dark-shadow), -5px -5px 10px var(--light-shadow)', borderColor: 'transparent' }}>{r}</button>)}</div>}
 
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.28, ease: 'easeOut' }}>
@@ -5104,13 +5120,13 @@ const App: React.FC = () => {
                 const ei = getEmployeeExpenseInfo(e);
                 return (<tr key={e.id} className={`border-t border-gray-800 hover:bg-gray-800/30 transition ${e.hidden ? 'opacity-50' : ''}`}>
                   <td className="px-6 py-4 font-mono text-cyan-400">{e.autoId}</td><td className="px-6 py-4 font-semibold">{e.name}</td><td className="px-6 py-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs font-semibold">{e.role}</span></td><td className="px-6 py-4 hidden xl:table-cell text-gray-400">{e.department || '—'}</td>
-                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{(() => { const cm = getClCurrentMonth(); const { earned } = getEarnedSalaryForMonth(e, cm, attendance, holidays); const ded = e.monthDeduction?.[cm] ?? e.otherDeduction ?? 0; return Math.max(0, earned - ded).toLocaleString(); })()}<p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()} • Earned ₹{getEarnedSalaryForMonth(e, getClCurrentMonth(), attendance, holidays).earned.toLocaleString()}</p></td>
+                  <td className="px-6 py-4 font-semibold text-yellow-400">₹{(() => { const cm = getClCurrentMonth(); const { earned } = getEarnedSalaryForMonth(e, cm, attendance, holidays); return Math.max(0, earned).toLocaleString(); })()}<p className="text-xs text-gray-500 font-normal">Gross ₹{(e.salary || 0).toLocaleString()} • Earned ₹{getEarnedSalaryForMonth(e, getClCurrentMonth(), attendance, holidays).earned.toLocaleString()}</p></td>
                   <td className="px-6 py-4">
                     <div className="relative flex items-center gap-2">
                       <button onClick={() => { if (deductPopoverEmpId === e.id) { setDeductPopoverEmpId(''); return; } openDeductPopover(e); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition" title="Add/Edit monthly deduction"> <FiMinus size={13} /> Deduct</button>
                       {(() => {
                         const cm = getMonthKey(new Date());
-                        const cur = e.monthDeduction?.[cm] ?? e.otherDeduction ?? 0;
+                        const cur = getMonthDeductionInfo(e, cm).amount;
                         if (cur <= 0) return <span className="text-xs text-gray-500">—</span>;
                         return <span className="text-xs text-red-400 whitespace-nowrap" title={`Deduction for ${cm} (one-month only)`}>₹{cur.toLocaleString()} ({new Date(cm + '-01T00:00:00').toLocaleDateString('en-US', { month: 'short' })})</span>;
                       })()}
@@ -5282,6 +5298,11 @@ const App: React.FC = () => {
             showNotification={showNotification}
             isReadOnly={isReadOnly}
           />
+        )}
+
+        {/* ===== SALARY DEDUCTION CALCULATOR ===== */}
+        {activeTab === 'salaryDeduction' && (
+          <SalaryDeductionCalculator schoolSettings={schoolSettings} />
         )}
 
 
