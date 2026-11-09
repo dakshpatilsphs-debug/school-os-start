@@ -407,12 +407,17 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
       });
     };
 
+    const clAnnualQuota = getEmpClQuota(emp);
+    const clUsedTotal = getClUsedTotal(emp.autoId, currentMonth, attendance);
+    const clRemaining = Math.max(0, clAnnualQuota - clUsedTotal);
+
     drawCard(ML, 'EMPLOYEE DETAILS', [
       ['Employee ID', emp.autoId],
       ['Designation', emp.role || '-'],
       ['Working Days', summ.workingDays],
       ['Present Days', summ.present],
       ['Absent Days', summ.absent],
+      ['CL Balance', `${clRemaining} / ${clAnnualQuota}`],
     ]);
     drawCard(ML + cardW + padLg, 'BANK & PAY DETAILS', [
       ['Department', emp.department || '-'],
@@ -486,9 +491,9 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
     doc.setFillColor(255, 255, 255);
     doc.roundedRect(sumTableX, sy2, sumTableW, sumContH, 3, 3, 'F');
     doc.setDrawColor(...sBorder); doc.setLineWidth(0.1);
-    doc.line(sumTableX + padLg, sy2 + tBarH, MR, sy2 + tBarH);
+    doc.line(sumTableX + padLg, sy2 + tBarH, sumTableX + sumTableW - padLg, sy2 + tBarH);
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sPrimary);
-    doc.text('SALARY DETAILS', ML + padLg, y + 7.5);
+    doc.text('SALARY DETAILS', sumTableX + padLg, sy2 + 7.5);
 
     const colW2 = (CW - padLg * 3) / 2;
     const earnX2 = ML + padLg;
@@ -1426,6 +1431,45 @@ export const AttendanceSection: React.FC<AttendanceProps> = ({
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+          </div>
+          )}
+          {/* Direct Pay Confirmation Dialog */}
+          {directPay && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-[#1E1E1E] border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                  <FiDollarSign className="text-emerald-400" /> Direct Salary Payment
+                </h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  Pay <span className="font-semibold text-emerald-400">₹{directPayAmount.toLocaleString()}</span> to <span className="font-semibold text-white">{directPay.emp.name}</span>
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Amount (₹)</label>
+                    <input
+                      type="number"
+                      value={directPayAmount}
+                      onChange={e => setDirectPayAmount(Number(e.target.value) || 0)}
+                      className="w-full p-3 bg-gray-800 rounded-lg border border-gray-700 text-white text-sm focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setDirectPay(null)}
+                      className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmDirectPay}
+                      disabled={directPaying}
+                      className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white rounded-lg font-semibold shadow transition disabled:opacity-50"
+                    >
+                      {directPaying ? 'Paying...' : 'Confirm Pay'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
